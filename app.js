@@ -505,9 +505,23 @@ function feedbackHtml(fb) {
   if (!fb) return "";
   if (fb.unchanged) {
     return `<div class="feedback-box ok">
-      <p class="feedback-title">這句看起來沒問題，先不用改。</p>
-      <p class="hint">檢查通過時不會硬改你的句子；原句會照你寫的保留。</p>
-      ${fb.tip ? `<p class="hint">${escapeHtml(fb.tip)}</p>` : ""}
+      <p class="feedback-title">${escapeHtml(fb.naturalComment || "這句看起來沒問題，先不用改。")}</p>
+      <p class="hint">句子正確時不會硬改你的原句；原句會一直保留。</p>
+      ${
+        (fb.styleNotes || []).length
+          ? `<ul class="feedback-notes">${fb.styleNotes
+              .map(
+                (note) =>
+                  `<li>自然度提示：${escapeHtml(note.shortMessage || note.message)}${
+                    note.replacements?.length
+                      ? ` → ${note.replacements.map((r) => escapeHtml(r)).join(" / ")}`
+                      : ""
+                  }</li>`
+              )
+              .join("")}</ul>`
+          : ""
+      }
+      ${fb.tip && fb.tip !== fb.naturalComment ? `<p class="hint">${escapeHtml(fb.tip)}</p>` : ""}
     </div>`;
   }
   return `<div class="feedback-box">
@@ -962,6 +976,8 @@ function bindViewEvents() {
           corrected: result.corrected,
           unchanged: result.unchanged,
           notes: result.notes || [],
+          styleNotes: result.styleNotes || [],
+          naturalComment: result.naturalComment || "",
           tip: result.tip || "",
         };
       } catch {
@@ -1099,6 +1115,8 @@ function ensureSentenceActions() {
           corrected: result.corrected,
           unchanged: result.unchanged,
           notes: result.notes || [],
+          styleNotes: result.styleNotes || [],
+          naturalComment: result.naturalComment || "",
           tip: result.tip || "",
           checkedAt: Date.now(),
         });

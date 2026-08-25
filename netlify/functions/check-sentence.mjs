@@ -18,10 +18,40 @@ function summarizeMatches(matches) {
   return matches.slice(0, 6).map((match) => ({
     message: match.message || "Possible issue",
     shortMessage: match.shortMessage || "",
+    category: match.rule?.category?.id || "",
     offset: match.offset,
     length: match.length,
     replacements: (match.replacements || []).slice(0, 3).map((r) => r.value),
   }));
+}
+
+function isStyleMatch(match) {
+  const category = match.rule?.category?.id || match.category || "";
+  return ["STYLE", "REDUNDANCY", "COLLOCATIONS", "TYPOGRAPHY", "CASING"].includes(category);
+}
+
+function buildNaturalComment({ text, word, unchanged, grammarNotes, styleNotes }) {
+  const wordUsed =
+    word &&
+    new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(text);
+
+  if (!unchanged) {
+    return "";
+  }
+
+  if (word && !wordUsed) {
+    return `文法大致 OK，但這句好像還沒用到單字「${word}」。`;
+  }
+
+  if (styleNotes.length) {
+    return `文法正確，不過用法可以更自然一點（見下方提示）。`;
+  }
+
+  if (wordUsed) {
+    return `文法正確，「${word}」在這裡的用法看起來自然。`;
+  }
+
+  return "文法正確，這樣用看起來自然。";
 }
 
 export default async (req) => {
@@ -70,8 +100,11 @@ export default async (req) => {
 
     const data = await ltRes.json();
     const matches = Array.isArray(data.matches) ? data.matches : [];
-    const corrected = applyReplacements(text, matches);
-    const notes = summarizeMatches(matches);
+    const grammarMatches = matches.filter((m) => !isStyleMatch(m));
+    const styleMatches = matches.filter((m) => isStyleMatch(m));
+    const corrected = applyReplacements(text, grammarMatches);
+    const notes = summarizeMatches(grammarMatches);
+    const styleNotes = summarizeMatches(styleMatches);
     const unchanged = corrected.trim() === text.trim();
 
     let tip = "";
@@ -79,12 +112,22 @@ export default async (req) => {
       tip = `這句好像還沒用到單字「${word}」。`;
     }
 
+    const naturalComment = buildNaturalComment({
+      text,
+      word,
+      unchanged,
+      grammarNotes: notes,
+      styleNotes,
+    });
+
     return Response.json(
       {
         original: text,
         corrected,
         unchanged,
         notes,
+        styleNotes,
+        naturalComment,
         tip,
       },
       { headers: cors }
