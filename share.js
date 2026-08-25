@@ -1,8 +1,9 @@
 const Classroom = {
-  api: "/api/room",
+  // Always use the Netlify site so GitHub Pages / old links still share rooms.
+  api: "https://3180class.netlify.app/api/room",
   nameKey: "class3180.displayName",
-  roomKey: "class3180.roomId.v2",
-  cacheKey: "class3180.classroomCache.v2",
+  roomKey: "class3180.roomId.v3",
+  cacheKey: "class3180.classroomCache.v3",
   pollMs: 3000,
   presenceMs: 45000,
   pending: [],
@@ -36,11 +37,22 @@ const Classroom = {
 
   shareLink() {
     if (!this.roomId) return "";
-    const url = new URL(location.href);
-    url.search = "";
-    url.hash = "";
+    // Prefer the clean Netlify URL when sharing.
+    const url = new URL("https://3180class.netlify.app/");
     url.searchParams.set("room", this.roomId);
     return url.toString();
+  },
+
+  clearRoom(message = "") {
+    this.roomId = "";
+    this.data = { sentences: [], presence: {} };
+    this.pending = [];
+    localStorage.removeItem(this.roomKey);
+    localStorage.removeItem(this.cacheKey);
+    const url = new URL(location.href);
+    url.searchParams.delete("room");
+    history.replaceState({}, "", url);
+    this.status = message;
   },
 
   async createRoom() {
@@ -58,6 +70,8 @@ const Classroom = {
     this.roomId = data.id;
     localStorage.setItem(this.roomKey, data.id);
     this.data = { sentences: [], presence: {} };
+    this.pending = [];
+    this.status = "";
     this.cache();
     this.writeRoomToUrl();
   },
@@ -66,6 +80,7 @@ const Classroom = {
     this.roomId = id.trim();
     if (!this.roomId) return;
     localStorage.setItem(this.roomKey, this.roomId);
+    this.status = "";
     this.writeRoomToUrl();
   },
 
@@ -77,7 +92,7 @@ const Classroom = {
   },
 
   roomUrl() {
-    return `${this.api}/${this.roomId}`;
+    return `${this.api}/${encodeURIComponent(this.roomId)}`;
   },
 
   cache() {
@@ -101,6 +116,11 @@ const Classroom = {
     const res = await fetch(this.roomUrl(), {
       headers: { Accept: "application/json" },
     });
+    if (res.status === 404) {
+      const err = new Error("not-found");
+      err.code = "not-found";
+      throw err;
+    }
     if (!res.ok) throw new Error("get-failed");
     const data = await res.json();
     return {
@@ -128,8 +148,12 @@ const Classroom = {
       this.data = this.merge(remote, this.pending);
       this.cache();
       this.status = "";
-    } catch {
-      this.status = "暫時連不上教室，先看本機留下的句子。";
+    } catch (error) {
+      if (error?.code === "not-found") {
+        this.clearRoom("這個教室已失效，請重新按「建立教室」。");
+        return;
+      }
+      this.status = "暫時連不上教室，請確認你開的是 https://3180class.netlify.app/";
     }
   },
 
@@ -151,7 +175,11 @@ const Classroom = {
           this.status = "";
           return;
         }
-      } catch {
+      } catch (error) {
+        if (error?.code === "not-found") {
+          this.clearRoom("這個教室已失效，請重新按「建立教室」。");
+          return;
+        }
         this.status = "正在重試送出…";
       }
       await new Promise((resolve) => setTimeout(resolve, 250 * (i + 1)));

@@ -402,8 +402,17 @@ function sentenceHtml() {
 
 function classroomSetupHtml(name, roomReady) {
   const online = Classroom.onlineNames();
+  const wrongHost =
+    !location.hostname.includes("3180class.netlify.app") &&
+    location.protocol.startsWith("http");
   return `
     <section class="panel">
+      ${
+        wrongHost
+          ? `<p class="share-status">請改開這個網址才能一起造句：https://3180class.netlify.app/</p>`
+          : ""
+      }
+      ${Classroom.status ? `<p class="share-status">${escapeHtml(Classroom.status)}</p>` : ""}
       <form id="nameForm" class="name-row">
         <label>你的名字
           <input id="displayNameInput" value="${escapeHtml(name)}" placeholder="例如：姐姐、小華" maxlength="20" required>
@@ -416,6 +425,7 @@ function classroomSetupHtml(name, roomReady) {
              <div class="link-box" id="roomLink">${escapeHtml(Classroom.shareLink())}</div>
              <div class="row">
                <button class="primary" type="button" id="copyRoomLink">複製連結</button>
+               <button class="ghost" type="button" id="resetRoomBtn">重新建立教室</button>
              </div>
              <div class="presence" id="presenceList">${presenceHtml(online)}</div>`
           : `<p class="hint">還沒有教室。建立一間，再把連結傳出去就可以一起寫。</p>
@@ -474,15 +484,26 @@ function timeAgo(at) {
   return new Date(at).toLocaleString("zh-Hant");
 }
 
+function onClassroomTick() {
+  if (!Classroom.roomId) {
+    Classroom.stopLoop();
+    render();
+    return;
+  }
+  paintClassroomLive();
+}
+
 function paintClassroomLive() {
   const word = currentWord("sentenceIndex");
   const wall = document.getElementById("sentenceWall");
   if (word && wall) wall.innerHTML = wallHtml(word.id);
   const presence = document.getElementById("presenceList");
   if (presence) presence.innerHTML = presenceHtml(Classroom.onlineNames());
-  const status = document.querySelector(".share-status");
-  if (Classroom.status) {
-    if (status) status.textContent = Classroom.status;
+  const statuses = document.querySelectorAll(".share-status");
+  if (Classroom.status && statuses.length) {
+    statuses.forEach((el) => {
+      el.textContent = Classroom.status;
+    });
   }
 }
 
@@ -592,7 +613,7 @@ function bindViewEvents() {
     btn.onclick = () => {
       state.view = btn.dataset.view;
       if (state.view === "sentence") {
-        Classroom.startLoop(() => paintClassroomLive());
+        Classroom.startLoop(onClassroomTick);
       } else {
         Classroom.stopLoop();
       }
@@ -745,13 +766,23 @@ function bindViewEvents() {
       createRoomBtn.textContent = "建立中…";
       try {
         await Classroom.createRoom();
-        Classroom.startLoop(() => paintClassroomLive());
+        Classroom.startLoop(onClassroomTick);
         render();
       } catch {
         alert("教室暫時建立失敗。請重新整理頁面後再試一次。");
         createRoomBtn.disabled = false;
         createRoomBtn.textContent = "建立教室";
       }
+    };
+  }
+
+  const resetRoomBtn = document.getElementById("resetRoomBtn");
+  if (resetRoomBtn) {
+    resetRoomBtn.onclick = () => {
+      if (!confirm("要關掉現在這間教室，重新建立一間嗎？")) return;
+      Classroom.clearRoom();
+      Classroom.stopLoop();
+      render();
     };
   }
 
@@ -769,7 +800,7 @@ function bindViewEvents() {
         /* plain room id */
       }
       Classroom.joinRoom(id);
-      Classroom.startLoop(() => paintClassroomLive());
+      Classroom.startLoop(onClassroomTick);
       render();
     };
   }
@@ -919,5 +950,5 @@ document.getElementById("importInput").onchange = (event) => {
 
 render();
 if (state.view === "sentence" && Classroom.roomId) {
-  Classroom.startLoop(() => paintClassroomLive());
+  Classroom.startLoop(onClassroomTick);
 }
