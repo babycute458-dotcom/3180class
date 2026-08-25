@@ -12,6 +12,7 @@ const Classroom = {
   data: { sentences: [], presence: {} },
   status: "",
   timer: null,
+  paused: false,
 
   boot() {
     const params = new URLSearchParams(location.search);
@@ -246,16 +247,27 @@ const Classroom = {
   startLoop(onTick) {
     this.stopLoop();
     const tick = async () => {
+      if (this.paused) return;
       await this.refresh();
+      if (this.paused) return;
       onTick();
     };
     tick();
     this.timer = setInterval(tick, this.pollMs);
   },
 
+  pause() {
+    this.paused = true;
+  },
+
+  resume() {
+    this.paused = false;
+  },
+
   stopLoop() {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    this.paused = false;
   },
 };
 
