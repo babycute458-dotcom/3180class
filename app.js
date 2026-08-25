@@ -2,7 +2,7 @@ const KEY = "class3180.vocab.v2";
 const VIEWS = [
   ["book", "單字本"],
   ["cards", "閃卡"],
-  ["sentence", "造句"],
+  ["sentence", "教室造句"],
   ["compound", "組詞造字"],
   ["quiz", "小考"],
 ];
@@ -360,11 +360,13 @@ function cardsHtml() {
 function sentenceHtml() {
   const word = currentWord("sentenceIndex");
   if (!word) return emptyPractice();
+  const name = Classroom.displayName();
+  const roomReady = Boolean(Classroom.roomId);
   return `
     <header class="top">
       <div>
-        <h2>造句</h2>
-        <p>用這個單字寫一句完整的話。寫完會存在這個詞下面，方便之後複習。</p>
+        <h2>教室造句</h2>
+        <p>姐姐、同學可以同時寫。每人的句子都會留下來，不會互相覆蓋。</p>
       </div>
       <select id="sentenceSelect">${state.words
         .map(
@@ -373,6 +375,7 @@ function sentenceHtml() {
         )
         .join("")}</select>
     </header>
+    ${classroomSetupHtml(name, roomReady)}
     <section class="panel">
       <p class="practice-word">${escapeHtml(word.word)}</p>
       <p class="meta">${escapeHtml(word.pinyin)} · ${escapeHtml(word.meaning)}</p>
@@ -383,19 +386,104 @@ function sentenceHtml() {
         </label>
         <div class="row">
           <button class="ghost" type="button" data-sent="prev">上一個</button>
-          <button class="primary" type="submit">儲存句子</button>
+          <button class="primary" type="submit"${name && roomReady ? "" : " disabled"}>送到教室</button>
           <button class="secondary" type="button" data-sent="next">下一個單字</button>
         </div>
       </form>
+      ${Classroom.status ? `<p class="share-status">${escapeHtml(Classroom.status)}</p>` : ""}
+    </section>
+    <section class="panel">
+      <h3>大家的句子</h3>
+      <p class="hint">每人最新一句會放最上面，以前寫過的也會留著。</p>
+      <div id="sentenceWall">${wallHtml(word.id)}</div>
+    </section>
+  `;
+}
+
+function classroomSetupHtml(name, roomReady) {
+  const online = Classroom.onlineNames();
+  return `
+    <section class="panel">
+      <form id="nameForm" class="name-row">
+        <label>你的名字
+          <input id="displayNameInput" value="${escapeHtml(name)}" placeholder="例如：姐姐、小華" maxlength="20" required>
+        </label>
+        <button class="secondary" type="submit">記住我</button>
+      </form>
       ${
-        (word.sentences || []).length
-          ? `<p class="hint">已寫過的句子</p><div class="saved-list">${word.sentences
-              .map((s) => `<span>${escapeHtml(s)}</span>`)
-              .join("")}</div>`
-          : ""
+        roomReady
+          ? `<p class="hint">教室連結（傳給姐姐或同學）：</p>
+             <div class="link-box" id="roomLink">${escapeHtml(Classroom.shareLink())}</div>
+             <div class="row">
+               <button class="primary" type="button" id="copyRoomLink">複製連結</button>
+             </div>
+             <div class="presence" id="presenceList">${presenceHtml(online)}</div>`
+          : `<p class="hint">還沒有教室。建立一間，再把連結傳出去就可以一起寫。</p>
+             <div class="row">
+               <button class="primary" type="button" id="createRoomBtn">建立教室</button>
+             </div>
+             <form id="joinRoomForm" class="name-row">
+               <label>或貼上教室連結 / 代碼
+                 <input id="joinRoomInput" placeholder="貼上連結或 room 代碼">
+               </label>
+               <button class="ghost" type="submit">加入</button>
+             </form>`
       }
     </section>
   `;
+}
+
+function presenceHtml(online) {
+  if (!online.length) return `<span>教室裡暫時還沒有人在線上</span>`;
+  return online.map((n) => `<span>${escapeHtml(n)} 在線上</span>`).join("");
+}
+
+function wallHtml(wordId) {
+  const groups = Classroom.groupedFor(wordId);
+  if (!groups.length) {
+    return `<p class="hint">這個單字還沒有人造句。當第一個寫的人吧。</p>`;
+  }
+  const me = Classroom.displayName();
+  return groups
+    .map(([author, items]) => {
+      const latest = items[items.length - 1];
+      const older = items.slice(0, -1).reverse();
+      return `<article class="author-card ${author === me ? "mine" : ""}">
+        <div class="author-head">
+          <span class="author-name">${escapeHtml(author)}${author === me ? "（你）" : ""}</span>
+          <span class="meta">${timeAgo(latest.at)} · 共 ${items.length} 句</span>
+        </div>
+        <p class="latest">${escapeHtml(latest.text)}</p>
+        ${
+          older.length
+            ? `<div class="history">${older
+                .map((item) => `<p>${escapeHtml(item.text)} <span class="meta">${timeAgo(item.at)}</span></p>`)
+                .join("")}</div>`
+            : ""
+        }
+      </article>`;
+    })
+    .join("");
+}
+
+function timeAgo(at) {
+  const delta = Date.now() - at;
+  if (delta < 60000) return "剛剛";
+  if (delta < 3600000) return `${Math.floor(delta / 60000)} 分鐘前`;
+  if (delta < 86400000) return `${Math.floor(delta / 3600000)} 小時前`;
+  return new Date(at).toLocaleString("zh-Hant");
+}
+
+function paintClassroomLive() {
+  const word = currentWord("sentenceIndex");
+  const wall = document.getElementById("sentenceWall");
+  if (word && wall) wall.innerHTML = wallHtml(word.id);
+  const presence = document.getElementById("presenceList");
+  if (presence) presence.innerHTML = presenceHtml(Classroom.onlineNames());
+  const status = document.querySelector(".share-status");
+  if (Classroom.status) {
+    if (status) status.textContent = Classroom.status;
+  }
 }
 
 function compoundHtml() {
@@ -503,6 +591,11 @@ function bindViewEvents() {
   document.querySelectorAll("[data-view]").forEach((btn) => {
     btn.onclick = () => {
       state.view = btn.dataset.view;
+      if (state.view === "sentence") {
+        Classroom.startLoop(() => paintClassroomLive());
+      } else {
+        Classroom.stopLoop();
+      }
       render();
     };
   });
@@ -627,16 +720,103 @@ function bindViewEvents() {
     };
   }
 
+  const draftBox = document.getElementById("sentenceDraft");
+  if (draftBox) {
+    draftBox.oninput = () => {
+      state.sentenceDraft = draftBox.value;
+    };
+  }
+
+  const nameForm = document.getElementById("nameForm");
+  if (nameForm) {
+    nameForm.onsubmit = (event) => {
+      event.preventDefault();
+      const value = document.getElementById("displayNameInput").value.trim();
+      if (!value) return;
+      Classroom.setDisplayName(value);
+      render();
+    };
+  }
+
+  const createRoomBtn = document.getElementById("createRoomBtn");
+  if (createRoomBtn) {
+    createRoomBtn.onclick = async () => {
+      createRoomBtn.disabled = true;
+      createRoomBtn.textContent = "建立中…";
+      try {
+        await Classroom.createRoom();
+        Classroom.startLoop(() => paintClassroomLive());
+        render();
+      } catch {
+        alert("現在沒辦法建立教室，請稍後再試一次。");
+        createRoomBtn.disabled = false;
+        createRoomBtn.textContent = "建立教室";
+      }
+    };
+  }
+
+  const joinRoomForm = document.getElementById("joinRoomForm");
+  if (joinRoomForm) {
+    joinRoomForm.onsubmit = (event) => {
+      event.preventDefault();
+      const raw = document.getElementById("joinRoomInput").value.trim();
+      if (!raw) return;
+      let id = raw;
+      try {
+        const url = new URL(raw);
+        id = url.searchParams.get("room") || raw.split("/").filter(Boolean).pop();
+      } catch {
+        /* plain room id */
+      }
+      Classroom.joinRoom(id);
+      Classroom.startLoop(() => paintClassroomLive());
+      render();
+    };
+  }
+
+  const copyRoomLink = document.getElementById("copyRoomLink");
+  if (copyRoomLink) {
+    copyRoomLink.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(Classroom.shareLink());
+        copyRoomLink.textContent = "已複製";
+        setTimeout(() => {
+          copyRoomLink.textContent = "複製連結";
+        }, 1500);
+      } catch {
+        alert("請手動複製教室連結。");
+      }
+    };
+  }
+
   const sentenceForm = document.getElementById("sentenceForm");
   if (sentenceForm) {
-    sentenceForm.onsubmit = (event) => {
+    sentenceForm.onsubmit = async (event) => {
       event.preventDefault();
       const text = document.getElementById("sentenceDraft").value.trim();
+      const name = Classroom.displayName();
       if (!text) return;
+      if (!name) {
+        alert("請先填你的名字，大家才知道這句是誰寫的。");
+        return;
+      }
+      if (!Classroom.roomId) {
+        alert("請先建立或加入教室。");
+        return;
+      }
       const word = currentWord("sentenceIndex");
       word.sentences = [...(word.sentences || []), text];
-      state.sentenceDraft = "";
       saveWords();
+      state.sentenceDraft = "";
+      const entry = {
+        id: newId(),
+        wordId: word.id,
+        word: word.word,
+        author: name,
+        text,
+        at: Date.now(),
+      };
+      await Classroom.append(entry);
       render();
     };
   }
@@ -738,3 +918,6 @@ document.getElementById("importInput").onchange = (event) => {
 };
 
 render();
+if (state.view === "sentence" && Classroom.roomId) {
+  Classroom.startLoop(() => paintClassroomLive());
+}
