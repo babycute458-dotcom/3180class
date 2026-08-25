@@ -6,7 +6,7 @@
 
 打開這個網址就能練習（手機、電腦都可以）：
 
-**https://babycute458-dotcom.github.io/3180class/**
+**https://3180class.netlify.app/**
 
 手機瀏覽器也可以用「加入主畫面」，之後像 App 一樣點開。
 

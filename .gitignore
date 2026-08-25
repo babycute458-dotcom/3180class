@@ -3,3 +3,9 @@ dist
 .DS_Store
 *.local
 package-lock.json
+.vercel
+publish
+.vercel
+
+# Local Netlify folder
+.netlify

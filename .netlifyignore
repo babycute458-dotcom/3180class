@@ -1,0 +1,8 @@
+node_modules
+.git
+.netlify
+publish
+package-lock.json
+*.local
+單字清單.txt
+README.md
