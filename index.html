@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#9c2f1b" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="3180 單字" />
+    <title>3180 Class · 單字練習</title>
+    <link rel="manifest" href="manifest.json" />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@500;700;900&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-kicker">VOCAB LAB</span>
+          <h1>3180</h1>
+          <p>課堂單字 · 造句 · 組詞</p>
+        </div>
+        <nav class="nav" id="nav"></nav>
+        <div class="sidebar-foot">
+          <button class="primary" id="exportBtn">匯出單字</button>
+          <label class="ghost" style="text-align: center">
+            匯入 JSON
+            <input id="importInput" type="file" accept="application/json" hidden />
+          </label>
+        </div>
+      </aside>
+      <main class="main" id="main"></main>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "name": "3180 Class 單字練習",
+  "short_name": "3180 單字",
+  "description": "課堂單字、閃卡、造句、組詞與小考",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f4ecdc",
+  "theme_color": "#9c2f1b",
+  "lang": "zh-Hant",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
