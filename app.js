@@ -410,6 +410,7 @@ function classroomSetupHtml(name, roomReady) {
   const wrongHost =
     !location.hostname.includes("3180class.netlify.app") &&
     location.protocol.startsWith("http");
+  const code = Classroom.shortRoomCode();
   return `
     <section class="panel">
       ${
@@ -418,6 +419,7 @@ function classroomSetupHtml(name, roomReady) {
           : ""
       }
       ${Classroom.status ? `<p class="share-status">${escapeHtml(Classroom.status)}</p>` : ""}
+      <p class="hint">重要：只由一個人按「建立教室」，其他人一定要打開同一條教室連結，不要各自再建一間。</p>
       <form id="nameForm" class="name-row">
         <label>你的名字
           <input id="displayNameInput" value="${escapeHtml(name)}" placeholder="例如：姐姐、小華" maxlength="20" required>
@@ -426,14 +428,21 @@ function classroomSetupHtml(name, roomReady) {
       </form>
       ${
         roomReady
-          ? `<p class="hint">教室連結（傳給姐姐或同學）：</p>
+          ? `<p class="hint">你們現在的教室代碼：<strong>${escapeHtml(code)}</strong>（兩邊要一樣，才看得到彼此）</p>
+             <p class="hint">教室連結（傳給姐姐或同學）：</p>
              <div class="link-box" id="roomLink">${escapeHtml(Classroom.shareLink())}</div>
              <div class="row">
                <button class="primary" type="button" id="copyRoomLink">複製連結</button>
-               <button class="ghost" type="button" id="resetRoomBtn">重新建立教室</button>
+               <button class="ghost" type="button" id="resetRoomBtn">離開並另開新教室</button>
              </div>
+             <form id="joinRoomForm" class="name-row">
+               <label>要改加入別人的教室？貼上她的連結
+                 <input id="joinRoomInput" placeholder="貼上姐姐傳的連結">
+               </label>
+               <button class="secondary" type="submit">切換過去</button>
+             </form>
              <div class="presence" id="presenceList">${presenceHtml(online)}</div>`
-          : `<p class="hint">還沒有教室。建立一間，再把連結傳出去就可以一起寫。</p>
+          : `<p class="hint">還沒有教室。建立一間，再把連結傳出去；姐姐請直接點你的連結，不要自己再建。</p>
              <div class="row">
                <button class="primary" type="button" id="createRoomBtn">建立教室</button>
              </div>
@@ -894,7 +903,7 @@ function bindViewEvents() {
   const resetRoomBtn = document.getElementById("resetRoomBtn");
   if (resetRoomBtn) {
     resetRoomBtn.onclick = () => {
-      if (!confirm("要關掉現在這間教室，重新建立一間嗎？")) return;
+      if (!confirm("這會離開現在這間教室。姐姐如果還在舊連結，就看不到你了。確定嗎？")) return;
       Classroom.clearRoom();
       Classroom.stopLoop();
       render();
@@ -913,6 +922,9 @@ function bindViewEvents() {
         id = url.searchParams.get("room") || raw.split("/").filter(Boolean).pop();
       } catch {
         /* plain room id */
+      }
+      if (Classroom.roomId && Classroom.roomId !== id) {
+        if (!confirm("要切換到這間教室嗎？切換後會看到對方那間教室的句子。")) return;
       }
       Classroom.joinRoom(id);
       Classroom.startLoop(onClassroomTick);

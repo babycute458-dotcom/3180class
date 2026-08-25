@@ -17,16 +17,48 @@ const Classroom = {
   boot() {
     const params = new URLSearchParams(location.search);
     const fromUrl = (params.get("room") || "").trim();
-    this.roomId = fromUrl || localStorage.getItem(this.roomKey) || "";
+    const stored = localStorage.getItem(this.roomKey) || "";
+    const nextRoom = fromUrl || stored;
+
+    if (fromUrl && stored && fromUrl !== stored) {
+      // Opened someone else's classroom link: drop the old room's local cache.
+      this.pending = [];
+      localStorage.removeItem(this.cacheKey);
+      this.data = { sentences: [], presence: {} };
+    }
+
+    this.roomId = nextRoom;
     if (fromUrl) localStorage.setItem(this.roomKey, fromUrl);
-    const cached = localStorage.getItem(this.cacheKey);
-    if (cached) {
-      try {
-        this.data = JSON.parse(cached);
-      } catch {
-        this.data = { sentences: [], presence: {} };
+
+    if (this.roomId) {
+      const cached = localStorage.getItem(this.cacheKeyFor(this.roomId));
+      if (cached) {
+        try {
+          this.data = JSON.parse(cached);
+        } catch {
+          this.data = { sentences: [], presence: {} };
+        }
+      } else {
+        // Fallback to legacy single-cache key once.
+        const legacy = localStorage.getItem(this.cacheKey);
+        if (legacy) {
+          try {
+            this.data = JSON.parse(legacy);
+          } catch {
+            this.data = { sentences: [], presence: {} };
+          }
+        }
       }
     }
+  },
+
+  cacheKeyFor(roomId) {
+    return `${this.cacheKey}:${roomId}`;
+  },
+
+  shortRoomCode() {
+    if (!this.roomId) return "";
+    return this.roomId.slice(0, 8);
   },
 
   displayName() {
@@ -39,13 +71,13 @@ const Classroom = {
 
   shareLink() {
     if (!this.roomId) return "";
-    // Prefer the clean Netlify URL when sharing.
     const url = new URL("https://3180class.netlify.app/");
     url.searchParams.set("room", this.roomId);
     return url.toString();
   },
 
   clearRoom(message = "") {
+    if (this.roomId) localStorage.removeItem(this.cacheKeyFor(this.roomId));
     this.roomId = "";
     this.data = { sentences: [], presence: {} };
     this.pending = [];
@@ -55,6 +87,20 @@ const Classroom = {
     url.searchParams.delete("room");
     history.replaceState({}, "", url);
     this.status = message;
+  },
+
+  switchToRoom(id, { clearPending = true } = {}) {
+    const next = String(id || "").trim();
+    if (!next) return;
+    if (this.roomId && this.roomId !== next) {
+      localStorage.removeItem(this.cacheKeyFor(this.roomId));
+      if (clearPending) this.pending = [];
+      this.data = { sentences: [], presence: {} };
+    }
+    this.roomId = next;
+    localStorage.setItem(this.roomKey, this.roomId);
+    this.status = "";
+    this.writeRoomToUrl();
   },
 
   async createRoom() {
@@ -69,21 +115,15 @@ const Classroom = {
     if (!res.ok) throw new Error("create-failed");
     const data = await res.json();
     if (!data.id) throw new Error("no-id");
-    this.roomId = data.id;
-    localStorage.setItem(this.roomKey, data.id);
+    this.switchToRoom(data.id);
     this.data = { sentences: [], presence: {} };
     this.pending = [];
     this.status = "";
     this.cache();
-    this.writeRoomToUrl();
   },
 
   joinRoom(id) {
-    this.roomId = id.trim();
-    if (!this.roomId) return;
-    localStorage.setItem(this.roomKey, this.roomId);
-    this.status = "";
-    this.writeRoomToUrl();
+    this.switchToRoom(id);
   },
 
   writeRoomToUrl() {
@@ -98,6 +138,9 @@ const Classroom = {
   },
 
   cache() {
+    if (!this.roomId) return;
+    localStorage.setItem(this.cacheKeyFor(this.roomId), JSON.stringify(this.data));
+    // Keep legacy key in sync for older tabs.
     localStorage.setItem(this.cacheKey, JSON.stringify(this.data));
   },
 
