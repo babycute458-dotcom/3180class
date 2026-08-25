@@ -189,6 +189,7 @@ const state = {
   flipped: false,
   sentenceIndex: 0,
   sentenceDraft: "",
+  draftFeedback: null,
   compoundIndex: 0,
   compoundChar: "",
   compoundDraft: "",
@@ -386,15 +387,17 @@ function sentenceHtml() {
         </label>
         <div class="row">
           <button class="ghost" type="button" data-sent="prev">上一個</button>
+          <button class="ghost" type="button" id="checkDraftBtn"${name ? "" : " disabled"}>先檢查草稿</button>
           <button class="primary" type="submit"${name && roomReady ? "" : " disabled"}>送到教室</button>
           <button class="secondary" type="button" data-sent="next">下一個單字</button>
         </div>
       </form>
+      <div id="draftFeedback">${state.draftFeedback ? feedbackHtml(state.draftFeedback) : ""}</div>
       ${Classroom.status ? `<p class="share-status">${escapeHtml(Classroom.status)}</p>` : ""}
     </section>
     <section class="panel">
       <h3>大家的句子</h3>
-      <p class="hint">每人最新一句會放最上面，以前寫過的也會留著。</p>
+      <p class="hint">原句會一直保留。你可以檢查自己的句子，看建議改寫，再決定要不要送出修改版。</p>
       <div id="sentenceWall">${wallHtml(word.id)}</div>
     </section>
   `;
@@ -456,24 +459,71 @@ function wallHtml(wordId) {
   const me = Classroom.displayName();
   return groups
     .map(([author, items]) => {
-      const latest = items[items.length - 1];
-      const older = items.slice(0, -1).reverse();
+      const ordered = [...items].reverse();
       return `<article class="author-card ${author === me ? "mine" : ""}">
         <div class="author-head">
           <span class="author-name">${escapeHtml(author)}${author === me ? "（你）" : ""}</span>
-          <span class="meta">${timeAgo(latest.at)} · 共 ${items.length} 句</span>
+          <span class="meta">共 ${items.length} 句</span>
         </div>
-        <p class="latest">${escapeHtml(latest.text)}</p>
-        ${
-          older.length
-            ? `<div class="history">${older
-                .map((item) => `<p>${escapeHtml(item.text)} <span class="meta">${timeAgo(item.at)}</span></p>`)
-                .join("")}</div>`
-            : ""
-        }
+        ${ordered.map((item, idx) => sentenceBlockHtml(item, me, idx === 0)).join("")}
       </article>`;
     })
     .join("");
+}
+
+function sentenceBlockHtml(item, me, isLatest) {
+  const mine = item.author === me;
+  const fb = item.feedback;
+  return `<div class="sentence-block ${isLatest ? "is-latest" : ""}" data-sentence-id="${item.id}">
+    <p class="${isLatest ? "latest" : "history-line"}">
+      ${escapeHtml(item.text)}
+      ${item.revisionOf ? `<span class="chip pine">修改版</span>` : ""}
+      <span class="meta">${timeAgo(item.at)}</span>
+    </p>
+    ${fb ? feedbackHtml(fb) : ""}
+    ${
+      mine
+        ? `<div class="row sentence-actions">
+            <button class="ghost" type="button" data-check="${item.id}">${fb ? "再檢查一次" : "檢查這句"}</button>
+            ${
+              fb && fb.corrected && !fb.unchanged
+                ? `<button class="secondary" type="button" data-use-suggest="${item.id}">把建議放進輸入框</button>
+                   <button class="primary" type="button" data-post-suggest="${item.id}">送出建議版</button>`
+                : ""
+            }
+          </div>`
+        : ""
+    }
+  </div>`;
+}
+
+function feedbackHtml(fb) {
+  if (!fb) return "";
+  if (fb.unchanged) {
+    return `<div class="feedback-box ok">
+      <p class="feedback-title">檢查結果：看起來不錯</p>
+      ${fb.tip ? `<p class="hint">${escapeHtml(fb.tip)}</p>` : ""}
+    </div>`;
+  }
+  return `<div class="feedback-box">
+    <p class="feedback-title">原句會保留。建議改寫：</p>
+    <p class="suggest-line">${escapeHtml(fb.corrected || "")}</p>
+    ${
+      (fb.notes || []).length
+        ? `<ul class="feedback-notes">${fb.notes
+            .map(
+              (note) =>
+                `<li>${escapeHtml(note.shortMessage || note.message)}${
+                  note.replacements?.length
+                    ? ` → ${note.replacements.map((r) => escapeHtml(r)).join(" / ")}`
+                    : ""
+                }</li>`
+            )
+            .join("")}</ul>`
+        : ""
+    }
+    ${fb.tip ? `<p class="hint">${escapeHtml(fb.tip)}</p>` : ""}
+  </div>`;
 }
 
 function timeAgo(at) {
@@ -482,6 +532,37 @@ function timeAgo(at) {
   if (delta < 3600000) return `${Math.floor(delta / 60000)} 分鐘前`;
   if (delta < 86400000) return `${Math.floor(delta / 3600000)} 小時前`;
   return new Date(at).toLocaleString("zh-Hant");
+}
+
+async function checkSentenceText(text, word) {
+  const res = await fetch(Classroom.checkApi, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({ text, word }),
+  });
+  if (!res.ok) throw new Error("check-failed");
+  return res.json();
+}
+
+async function postSentenceEntry(text, extra = {}) {
+  const name = Classroom.displayName();
+  const word = currentWord("sentenceIndex");
+  if (!text || !name || !Classroom.roomId || !word) return;
+  word.sentences = [...(word.sentences || []), text];
+  saveWords();
+  const entry = {
+    id: newId(),
+    wordId: word.id,
+    word: word.word,
+    author: name,
+    text,
+    at: Date.now(),
+    ...extra,
+  };
+  await Classroom.append(entry);
 }
 
 function onClassroomTick() {
@@ -835,26 +916,95 @@ function bindViewEvents() {
         alert("請先建立或加入教室。");
         return;
       }
-      const word = currentWord("sentenceIndex");
-      word.sentences = [...(word.sentences || []), text];
-      saveWords();
       state.sentenceDraft = "";
-      const entry = {
-        id: newId(),
-        wordId: word.id,
-        word: word.word,
-        author: name,
-        text,
-        at: Date.now(),
-      };
-      await Classroom.append(entry);
+      state.draftFeedback = null;
+      await postSentenceEntry(text);
       render();
     };
   }
 
+  const checkDraftBtn = document.getElementById("checkDraftBtn");
+  if (checkDraftBtn) {
+    checkDraftBtn.onclick = async () => {
+      const text = document.getElementById("sentenceDraft").value.trim();
+      const word = currentWord("sentenceIndex");
+      if (!text) {
+        alert("先寫一句再檢查。");
+        return;
+      }
+      checkDraftBtn.disabled = true;
+      checkDraftBtn.textContent = "檢查中…";
+      try {
+        const result = await checkSentenceText(text, word?.word || "");
+        state.draftFeedback = {
+          corrected: result.corrected,
+          unchanged: result.unchanged,
+          notes: result.notes || [],
+          tip: result.tip || "",
+        };
+        render();
+      } catch {
+        alert("現在沒辦法檢查句子，請稍後再試。");
+        checkDraftBtn.disabled = false;
+        checkDraftBtn.textContent = "先檢查草稿";
+      }
+    };
+  }
+
+  document.querySelectorAll("[data-check]").forEach((btn) => {
+    btn.onclick = async () => {
+      const id = btn.dataset.check;
+      const item = Classroom.data.sentences.find((s) => s.id === id);
+      if (!item) return;
+      btn.disabled = true;
+      btn.textContent = "檢查中…";
+      try {
+        const result = await checkSentenceText(item.text, item.word || "");
+        await Classroom.saveFeedback(id, {
+          corrected: result.corrected,
+          unchanged: result.unchanged,
+          notes: result.notes || [],
+          tip: result.tip || "",
+          checkedAt: Date.now(),
+        });
+        render();
+      } catch {
+        alert("現在沒辦法檢查句子，請稍後再試。");
+        btn.disabled = false;
+        btn.textContent = "檢查這句";
+      }
+    };
+  });
+
+  document.querySelectorAll("[data-use-suggest]").forEach((btn) => {
+    btn.onclick = () => {
+      const id = btn.dataset.useSuggest;
+      const item = Classroom.data.sentences.find((s) => s.id === id);
+      if (!item?.feedback?.corrected) return;
+      state.sentenceDraft = item.feedback.corrected;
+      state.draftFeedback = item.feedback;
+      render();
+      const draft = document.getElementById("sentenceDraft");
+      if (draft) draft.focus();
+    };
+  });
+
+  document.querySelectorAll("[data-post-suggest]").forEach((btn) => {
+    btn.onclick = async () => {
+      const id = btn.dataset.postSuggest;
+      const item = Classroom.data.sentences.find((s) => s.id === id);
+      if (!item?.feedback?.corrected || item.feedback.unchanged) return;
+      btn.disabled = true;
+      btn.textContent = "送出中…";
+      await postSentenceEntry(item.feedback.corrected, { revisionOf: item.id });
+      render();
+    };
+  });
+
   document.querySelectorAll("[data-sent]").forEach((btn) => {
     btn.onclick = () => {
       state.sentenceDraft = "";
+      state.draftFeedback = null;
       if (btn.dataset.sent === "prev") {
         state.sentenceIndex = (state.sentenceIndex - 1 + state.words.length) % state.words.length;
       } else {

@@ -359,6 +359,64 @@ textarea { min-height: 84px; resize: vertical; }
   font-size: 14px;
 }
 
+.sentence-block {
+  padding-top: 10px;
+  margin-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+
+.sentence-block.is-latest {
+  border-top: 0;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+.history-line {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.sentence-actions {
+  margin-top: 8px;
+  padding-top: 0;
+}
+
+.feedback-box {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid #e6d2a8;
+  background: #fff8e8;
+}
+
+.feedback-box.ok {
+  border-color: var(--pine);
+  background: var(--pine-soft);
+}
+
+.feedback-title {
+  margin: 0 0 6px;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.suggest-line {
+  margin: 0 0 8px;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.feedback-notes {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.feedback-notes li { margin: 4px 0; }
+
 .share-status {
   color: var(--seal);
   font-size: 13px;

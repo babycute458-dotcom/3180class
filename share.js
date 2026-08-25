@@ -1,6 +1,7 @@
 const Classroom = {
   // Always use the Netlify site so GitHub Pages / old links still share rooms.
   api: "https://3180class.netlify.app/api/room",
+  checkApi: "https://3180class.netlify.app/api/check-sentence",
   nameKey: "class3180.displayName",
   roomKey: "class3180.roomId.v3",
   cacheKey: "class3180.classroomCache.v3",
@@ -154,6 +155,30 @@ const Classroom = {
         return;
       }
       this.status = "暫時連不上教室，請確認你開的是 https://3180class.netlify.app/";
+    }
+  },
+
+  async saveFeedback(sentenceId, feedback) {
+    if (!this.roomId) return;
+    try {
+      const remote = await this.getRemote();
+      const sentences = (remote.sentences || []).map((item) =>
+        item.id === sentenceId ? { ...item, feedback } : item
+      );
+      const next = {
+        sentences,
+        presence: this.merge(remote, this.pending).presence,
+      };
+      await this.putRemote(next);
+      this.data = this.merge(next, this.pending);
+      this.cache();
+      this.status = "";
+    } catch {
+      this.status = "建議已顯示，但還沒同步到教室。";
+      this.data.sentences = (this.data.sentences || []).map((item) =>
+        item.id === sentenceId ? { ...item, feedback } : item
+      );
+      this.cache();
     }
   },
 
