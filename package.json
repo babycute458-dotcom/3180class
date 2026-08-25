@@ -1,0 +1,8 @@
+{
+  "name": "3180class",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@netlify/blobs": "^10.0.11"
+  }
+}

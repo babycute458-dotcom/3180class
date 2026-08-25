@@ -6,3 +6,5 @@ package-lock.json
 *.local
 單字清單.txt
 README.md
+create-body.json
+body.json

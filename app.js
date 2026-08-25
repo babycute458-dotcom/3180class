@@ -748,7 +748,7 @@ function bindViewEvents() {
         Classroom.startLoop(() => paintClassroomLive());
         render();
       } catch {
-        alert("現在沒辦法建立教室，請稍後再試一次。");
+        alert("教室暫時建立失敗。請重新整理頁面後再試一次。");
         createRoomBtn.disabled = false;
         createRoomBtn.textContent = "建立教室";
       }

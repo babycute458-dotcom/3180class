@@ -1,8 +1,8 @@
 const Classroom = {
-  api: "https://jsonblob.com/api/jsonBlob",
+  api: "/api/room",
   nameKey: "class3180.displayName",
-  roomKey: "class3180.roomId",
-  cacheKey: "class3180.classroomCache",
+  roomKey: "class3180.roomId.v2",
+  cacheKey: "class3180.classroomCache.v2",
   pollMs: 3000,
   presenceMs: 45000,
   pending: [],
@@ -53,12 +53,10 @@ const Classroom = {
       body: JSON.stringify({ sentences: [], presence: {} }),
     });
     if (!res.ok) throw new Error("create-failed");
-    const id =
-      res.headers.get("x-jsonblob") ||
-      (res.headers.get("location") || res.url).split("/").filter(Boolean).pop();
-    if (!id) throw new Error("no-id");
-    this.roomId = id;
-    localStorage.setItem(this.roomKey, id);
+    const data = await res.json();
+    if (!data.id) throw new Error("no-id");
+    this.roomId = data.id;
+    localStorage.setItem(this.roomKey, data.id);
     this.data = { sentences: [], presence: {} };
     this.cache();
     this.writeRoomToUrl();
@@ -132,19 +130,6 @@ const Classroom = {
       this.status = "";
     } catch {
       this.status = "暫時連不上教室，先看本機留下的句子。";
-    }
-  },
-
-  async heartbeat() {
-    if (!this.roomId || !this.displayName()) return;
-    try {
-      const remote = await this.getRemote();
-      const next = this.merge(remote, this.pending);
-      await this.putRemote(next);
-      this.data = next;
-      this.cache();
-    } catch {
-      /* keep last cache */
     }
   },
 
