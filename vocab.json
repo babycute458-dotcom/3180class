@@ -262,5 +262,17 @@
     "sentences": [],
     "compounds": [],
     "known": false
+  },
+  {
+    "id": "w-forth",
+    "word": "forth",
+    "pinyin": "/fɔːrθ/",
+    "pos": "副詞 adv.",
+    "meaning": "向前、往外；out into view, or forward in place or time",
+    "example": "The plants put forth new leaves in spring. 植物在春天長出新葉。",
+    "lesson": "單字清單",
+    "sentences": [],
+    "compounds": [],
+    "known": false
   }
 ]

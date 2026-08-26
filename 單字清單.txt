@@ -23,3 +23,4 @@ laboratory        名詞 n.           實驗室                   a room where s
 balance           名詞／動詞 n./v.  平衡；使平衡             a steady position, or to keep something steady
 archaeological    形容詞 adj.       考古的、考古學的         related to the study of ancient cultures from ruins and objects
 buried            形容詞／動詞過去分詞 adj./v.  被埋的、埋葬的   put under the ground and covered
+forth             副詞 adv.         向前、往外               out into view, or forward in place or time
