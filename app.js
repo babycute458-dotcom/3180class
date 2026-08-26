@@ -399,7 +399,7 @@ function sentenceHtml() {
     </section>
     <section class="panel">
       <h3>大家的句子</h3>
-      <p class="hint">原句會一直保留。你可以檢查自己的句子，看建議改寫，再決定要不要送出修改版。</p>
+      <p class="hint">原句會一直保留。你可以檢查教室裡任何人的句子；檢查結果會一起顯示給大家看。</p>
       <div id="sentenceWall">${wallHtml(word.id)}</div>
     </section>
   `;
@@ -485,6 +485,7 @@ function wallHtml(wordId) {
 function sentenceBlockHtml(item, me, isLatest) {
   const mine = item.author === me;
   const fb = item.feedback;
+  const checking = state.checkingId === item.id;
   return `<div class="sentence-block ${isLatest ? "is-latest" : ""}" data-sentence-id="${item.id}">
     <p class="${isLatest ? "latest" : "history-line"}">
       ${escapeHtml(item.text)}
@@ -492,30 +493,32 @@ function sentenceBlockHtml(item, me, isLatest) {
       <span class="meta">${timeAgo(item.at)}</span>
     </p>
     ${fb ? feedbackHtml(fb) : ""}
-    ${
-      mine
-        ? `<div class="row sentence-actions">
-            <button class="ghost" type="button" data-check="${item.id}"${state.checkingId === item.id ? " disabled" : ""}>${
-              state.checkingId === item.id ? "檢查中…" : fb ? "再檢查一次" : "檢查這句"
-            }</button>
-            ${
-              fb && fb.corrected && !fb.unchanged
-                ? `<button class="secondary" type="button" data-use-suggest="${item.id}">把建議放進輸入框</button>
-                   <button class="primary" type="button" data-post-suggest="${item.id}">送出建議版</button>`
-                : ""
-            }
-          </div>`
-        : ""
-    }
+    <div class="row sentence-actions">
+      <button class="ghost" type="button" data-check="${item.id}"${checking || state.checkingDraft ? " disabled" : ""}>${
+        checking ? "檢查中…" : fb ? "再檢查一次" : "檢查這句"
+      }</button>
+      ${
+        fb && fb.corrected && !fb.unchanged
+          ? `<button class="secondary" type="button" data-use-suggest="${item.id}">把建議放進輸入框</button>
+             ${
+               mine
+                 ? `<button class="primary" type="button" data-post-suggest="${item.id}">送出建議版</button>`
+                 : `<span class="meta">建議已分享；作者可送出修改版</span>`
+             }`
+          : ""
+      }
+    </div>
   </div>`;
 }
 
 function feedbackHtml(fb) {
   if (!fb) return "";
+  const checkedBy = fb.checkedBy ? `<p class="meta">檢查者：${escapeHtml(fb.checkedBy)}</p>` : "";
   if (fb.unchanged) {
     return `<div class="feedback-box ok">
       <p class="feedback-title">${escapeHtml(fb.naturalComment || "這句看起來沒問題，先不用改。")}</p>
-      <p class="hint">句子正確時不會硬改你的原句；原句會一直保留。</p>
+      <p class="hint">句子正確時不會硬改原句；原句會一直保留，教室裡大家都能看到檢查結果。</p>
+      ${checkedBy}
       ${
         (fb.styleNotes || []).length
           ? `<ul class="feedback-notes">${fb.styleNotes
@@ -536,6 +539,7 @@ function feedbackHtml(fb) {
   return `<div class="feedback-box">
     <p class="feedback-title">原句會保留。這裡是建議改寫：</p>
     <p class="suggest-line">${escapeHtml(fb.corrected || "")}</p>
+    ${checkedBy}
     ${
       (fb.notes || []).length
         ? `<ul class="feedback-notes">${fb.notes
@@ -1131,6 +1135,7 @@ function ensureSentenceActions() {
           naturalComment: result.naturalComment || "",
           tip: result.tip || "",
           checkedAt: Date.now(),
+          checkedBy: Classroom.displayName() || "同學",
         });
       } catch {
         alert("現在沒辦法檢查句子，請稍後再試。");
