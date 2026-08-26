@@ -248,6 +248,18 @@ const SAMPLE = [
     compounds: [],
     known: false,
   },
+  {
+    id: "w-archaeological",
+    word: "archaeological",
+    pinyin: "/ˌɑːrkiəˈlɑːdʒɪkl/",
+    pos: "形容詞 adj.",
+    meaning: "考古的、考古學的；related to the study of ancient cultures from ruins and objects",
+    example: "They found an archaeological site near the river. 他們在河邊發現了一處考古遺址。",
+    lesson: "單字清單",
+    sentences: [],
+    compounds: [],
+    known: false,
+  },
 ];
 
 const state = {
