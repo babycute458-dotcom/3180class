@@ -166,5 +166,77 @@
     "sentences": [],
     "compounds": [],
     "known": false
+  },
+  {
+    "id": "w-skeleton",
+    "word": "skeleton",
+    "pinyin": "/ˈskelɪtn/",
+    "pos": "名詞 n.",
+    "meaning": "骨骼、骨架；the bones that support a body",
+    "example": "The museum shows a dinosaur skeleton. 博物館展示了一具恐龍骨骼。",
+    "lesson": "單字清單",
+    "sentences": [],
+    "compounds": [],
+    "known": false
+  },
+  {
+    "id": "w-excavation",
+    "word": "excavation",
+    "pinyin": "/ˌekskəˈveɪʃn/",
+    "pos": "名詞 n.",
+    "meaning": "挖掘、發掘；the act of digging to find something underground",
+    "example": "The excavation uncovered an ancient skull. 這次發掘挖出了一個古老的頭骨。",
+    "lesson": "單字清單",
+    "sentences": [],
+    "compounds": [],
+    "known": false
+  },
+  {
+    "id": "w-grab",
+    "word": "grab",
+    "pinyin": "/ɡræb/",
+    "pos": "動詞 v.",
+    "meaning": "抓住、搶拿；to take something quickly with your hand",
+    "example": "Please grab the rope carefully. 請小心地抓住繩子。",
+    "lesson": "單字清單",
+    "sentences": [],
+    "compounds": [],
+    "known": false
+  },
+  {
+    "id": "w-skull",
+    "word": "skull",
+    "pinyin": "/skʌl/",
+    "pos": "名詞 n.",
+    "meaning": "頭骨、頭蓋骨；the bones of the head",
+    "example": "The skull protects the brain. 頭骨保護大腦。",
+    "lesson": "單字清單",
+    "sentences": [],
+    "compounds": [],
+    "known": false
+  },
+  {
+    "id": "w-laboratory",
+    "word": "laboratory",
+    "pinyin": "/ˈlæbrətɔːri/",
+    "pos": "名詞 n.",
+    "meaning": "實驗室；a room where scientific tests and research are done",
+    "example": "The scientists work in the laboratory. 科學家在實驗室工作。",
+    "lesson": "單字清單",
+    "sentences": [],
+    "compounds": [],
+    "known": false
+  },
+  {
+    "id": "w-balance",
+    "word": "balance",
+    "pinyin": "/ˈbæləns/",
+    "pos": "名詞／動詞 n./v.",
+    "meaning": "平衡；使平衡；a steady position, or to keep something steady",
+    "example": "It is hard to keep your balance on ice. 在冰上保持平衡很難。",
+    "lesson": "單字清單",
+    "sentences": [],
+    "compounds": [],
+    "known": false
   }
 ]
