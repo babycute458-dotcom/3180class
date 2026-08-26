@@ -260,6 +260,18 @@ const SAMPLE = [
     compounds: [],
     known: false,
   },
+  {
+    id: "w-buried",
+    word: "buried",
+    pinyin: "/ˈberid/",
+    pos: "形容詞／動詞過去分詞 adj./v.",
+    meaning: "被埋的、埋葬的；put under the ground and covered",
+    example: "The treasure was buried under the sand. 寶藏被埋在沙子下面。",
+    lesson: "單字清單",
+    sentences: [],
+    compounds: [],
+    known: false,
+  },
 ];
 
 const state = {
