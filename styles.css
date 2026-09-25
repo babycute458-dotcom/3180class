@@ -79,6 +79,18 @@ button { cursor: pointer; }
   box-shadow: var(--shadow);
 }
 
+.casas-link {
+  display: block;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--seal-soft);
+  color: var(--seal);
+  font-weight: 700;
+  text-decoration: none;
+  text-align: center;
+}
+
 .sidebar-foot {
   margin-top: 32px;
   display: flex;
