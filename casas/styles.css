@@ -157,14 +157,17 @@ input[type="text"] {
   color: #2f343a;
 }
 
-.passage, .reader pre {
-  margin: 0;
+.byline { margin: -8px 0 14px; color: #6d7782; font-size: 14px; }
+.passage {
+  margin: 0 0 14px;
   font-family: Georgia, "Noto Serif TC", serif;
   font-size: calc(17px * var(--zoom, 1));
-  line-height: 1.55;
+  line-height: 1.6;
   color: #3e4650;
-  white-space: pre-wrap;
 }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+.gate { max-width: 640px; margin: 48px auto; background: white; border: 1px solid var(--line); border-radius: 8px; padding: 28px; }
+.gate h1 { margin: 0 0 8px; font-size: 28px; font-weight: 500; }
 
 .form-table { width: 100%; border-collapse: collapse; font-size: calc(16px * var(--zoom, 1)); }
 .form-table th, .form-table td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
@@ -359,4 +362,5 @@ input[type="text"] {
   .stage { grid-template-columns: 1fr; }
   .reader { max-height: 46vh; border-bottom-width: 4px; padding: 16px 16px 64px; }
   .score-visual { flex-direction: column; }
+  .pair { grid-template-columns: 1fr; }
 }

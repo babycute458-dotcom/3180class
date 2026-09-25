@@ -66,14 +66,34 @@ function shuffle(list) {
   return arr;
 }
 
-function pool(level) {
+function articles(level) {
   return (window.BANK || []).filter((item) => item.level === level);
 }
 
-function counts() {
-  const out = { A: 0, B: 0, C: 0, D: 0 };
-  (window.BANK || []).forEach((item) => { if (out[item.level] != null) out[item.level] += 1; });
-  return out;
+function inflate(passage, limit) {
+  const questions = limit ? passage.questions.slice(0, limit) : passage.questions;
+  return questions.map((question) => {
+    const choices = shuffle(question.choices.map((text, i) => ({ text, ok: i === question.answer })));
+    return {
+      passageId: passage.id,
+      title: passage.title,
+      by: passage.by || "",
+      paragraphs: passage.paragraphs,
+      right: passage.right || null,
+      q: question.q,
+      choices: choices.map((c) => c.text),
+      answer: choices.findIndex((c) => c.ok),
+      why: question.why,
+      whyZh: question.whyZh,
+    };
+  });
+}
+
+function placeLevel(correct) {
+  if (correct <= 1) return "A";
+  if (correct <= 3) return "B";
+  if (correct <= 5) return "C";
+  return "D";
 }
 
 function clock() {
@@ -85,52 +105,72 @@ function clock() {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
 }
 
-function start() {
-  const source = pool(state.level);
-  const n = Math.min(state.count, source.length);
-  state.items = shuffle(source).slice(0, n).map((item) => {
-    const choices = shuffle(item.choices.map((text, i) => ({ text, ok: i === item.answer })));
-    return { ...item, choices: choices.map((c) => c.text), answer: choices.findIndex((c) => c.ok) };
-  });
-  state.answers = state.items.map(() => null);
+function beginRound(items, screen) {
+  state.items = items;
+  state.answers = items.map(() => null);
   state.index = 0;
   state.zoom = 1;
   state.paused = false;
-  state.remainMs = 60 * 60 * 1000;
-  state.deadline = Date.now() + state.remainMs;
-  state.screen = "test";
+  state.screen = screen;
   state.showAll = false;
   state.resultPage = 0;
-  state.scoreSent = false;
-  state.scoreNote = "";
+  if (screen === "exam") {
+    state.scoreSent = false;
+    state.scoreNote = "";
+    state.remainMs = 60 * 60 * 1000;
+    state.deadline = Date.now() + state.remainMs;
+    state.finishedOn = null;
+  }
   savePrefs();
   render();
 }
 
+function startLocator() {
+  const items = (window.LOCATOR || []).flatMap((passage) => inflate(passage));
+  beginRound(items, "locator");
+}
+
+function startRehearsal() {
+  const pool = shuffle(articles(state.level));
+  state.rehearsalId = pool[0]?.id || "";
+  state.examIds = pool.slice(1, 3).map((item) => item.id);
+  beginRound(inflate(pool[0], 3), "rehearsal");
+}
+
+function startExam() {
+  const picked = articles(state.level).filter((item) => state.examIds.includes(item.id));
+  const items = picked.flatMap((passage) => inflate(passage));
+  beginRound(items, "exam");
+}
+
+function oneArticle(title, by, paragraphs) {
+  return `<article><h2 class="passage-title">${esc(title)}</h2>${by ? `<p class="byline">By ${esc(by)}</p>` : ""}${(paragraphs || []).map((p) => `<p class="passage">${esc(p)}</p>`).join("")}</article>`;
+}
+
 function passageHtml(item) {
-  const form = item.form
-    ? `<table class="form-table">${item.form.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join("")}</table>`
-    : "";
-  const body = item.body ? `<pre>${esc(item.body)}</pre>` : "";
-  return `<h2 class="passage-title">${esc(item.title)}</h2>${form}${body}`;
+  const left = oneArticle(item.title, item.by, item.paragraphs);
+  if (!item.right) return left;
+  return `<div class="pair">${left}${oneArticle(item.right.title, item.right.by, item.right.paragraphs)}</div>`;
 }
 
 function render() {
   clearInterval(timerId);
   document.documentElement.style.setProperty("--zoom", String(state.zoom || 1));
-  if (state.screen === "test") renderTest();
+  if (state.screen === "locator" || state.screen === "rehearsal" || state.screen === "exam") renderTest();
+  else if (state.screen === "level") renderLevel();
+  else if (state.screen === "ready") renderReady();
   else if (state.screen === "result") renderResult();
   else renderHome();
   bind();
 }
 
 function renderHome() {
-  const n = counts();
+  const articleCount = (window.BANK || []).length;
   app.innerHTML = `
     <div class="home">
       <a class="back" href="../">回單字練習</a>
       <h1>CASAS eTests Online</h1>
-      <p class="lede">Reading practice。畫面比照正式測驗：左邊文章，右邊選項。每次隨機抽題。</p>
+      <p class="lede">先做等級測驗，再做 3 題 Rehearsal，然後才進入正式考試。正式考是完整文章，不是一小段。</p>
       <section class="panel">
         <label class="field">Name
           <input id="name" type="text" maxlength="40" value="${esc(state.name)}" placeholder="Your name" />
@@ -138,43 +178,47 @@ function renderHome() {
         <label class="field">ID
           <input id="sid" type="text" maxlength="12" value="${esc(state.sid)}" />
         </label>
-        <div class="field">Level
-          <div class="levels">
-            ${LEVELS.map(([id, label, desc]) => `
-              <button type="button" class="level ${state.level === id ? "on" : ""}" data-level="${id}">
-                ${label}<small>${desc} · ${n[id] || 0}</small>
-              </button>`).join("")}
-          </div>
-        </div>
-        <div class="field">Questions
-          <div class="chips">
-            ${[10, 15, 20].map((c) => `<button type="button" class="chip ${state.count === c ? "on" : ""}" data-count="${c}">${c}</button>`).join("")}
-          </div>
-        </div>
-        <div class="field">Mode
-          <div class="chips">
-            <button type="button" class="chip ${state.mode === "test" ? "on" : ""}" data-mode="test">Test</button>
-            <button type="button" class="chip ${state.mode === "study" ? "on" : ""}" data-mode="study">Study</button>
-          </div>
-        </div>
-        <p class="fine">這不是正式 CASAS 成績。題庫 ${(window.BANK || []).length} 題，再測會重抽。</p>
-        <button class="begin" id="start" type="button">Begin</button>
+        <p class="fine">題庫有 ${articleCount} 篇文章。等級測驗決定 A 到 D，正式考再從那個等級隨機抽文章。Rehearsal 的 3 題不計分。</p>
+        <button class="begin" id="start" type="button">Begin locator</button>
       </section>
+    </div>`;
+}
+
+function renderLevel() {
+  const names = { A: "A 入門", B: "B 初級", C: "C 中級", D: "D 進階" };
+  app.innerHTML = `
+    <div class="gate">
+      <p class="fine">Locator result</p>
+      <h1>Reading level ${esc(state.level)}</h1>
+      <p>${esc(names[state.level] || state.level)}。答對 ${state.locatorCorrect} / ${state.locatorTotal}。接下來先做 3 題 Rehearsal，這 3 題不計入正式分數。</p>
+      <button class="begin" id="to-rehearsal" type="button">Start rehearsal</button>
+    </div>`;
+}
+
+function renderReady() {
+  app.innerHTML = `
+    <div class="gate">
+      <p class="fine">Rehearsal complete</p>
+      <h1>The test will begin</h1>
+      <p>Rehearsal：${state.rehearsalCorrect} / ${state.rehearsalTotal}。這 3 題不計分。正式考試會用別的文章，交卷後才看答案。</p>
+      <button class="begin" id="to-exam" type="button">Begin test</button>
     </div>`;
 }
 
 function renderTest() {
   const item = state.items[state.index];
   const picked = state.answers[state.index];
-  const show = state.mode === "study" && picked != null;
+  const show = false;
   const pct = Math.round(((state.index + 1) / state.items.length) * 100);
   const last = state.index === state.items.length - 1;
+  const phase = state.screen === "exam" ? "Time Remaining" : state.screen === "rehearsal" ? "Rehearsal" : "Locator";
+  const phaseValue = state.screen === "exam" ? clock() : `${state.index + 1} / ${state.items.length}`;
   app.innerHTML = `
     <div class="exam">
       <header class="head">
         <div class="head-cell"><span>ID</span><strong>${esc(state.sid)}</strong></div>
         <div class="head-cell"><span>Name</span><strong>${esc(state.name || "Student")}</strong></div>
-        <div class="head-cell"><span>Time Remaining</span><strong id="clock">${clock()}</strong></div>
+        <div class="head-cell"><span>${phase}</span><strong id="clock">${phaseValue}</strong></div>
         <button class="pause" id="pause" type="button" aria-label="Pause">${state.paused ? "▶" : "❚❚"}</button>
       </header>
       <div class="stage">
@@ -202,11 +246,12 @@ function renderTest() {
           </div>
           <div class="q-nav">
             <button id="prev" type="button" ${state.index === 0 ? "disabled" : ""}>‹</button>
-            ${last ? `<button class="finish" id="finish" type="button">Finish</button>` : `<button id="next" type="button">›</button>`}
+            ${last ? `<button class="finish" id="finish" type="button">${state.screen === "exam" ? "Finish" : "Continue"}</button>` : `<button id="next" type="button">›</button>`}
           </div>
         </section>
       </div>
     </div>`;
+  if (state.screen !== "exam") return;
   timerId = setInterval(() => {
     const el = document.getElementById("clock");
     if (!el) return;
@@ -219,6 +264,23 @@ function renderTest() {
 }
 
 function finishTest() {
+  const correct = state.items.filter((item, i) => state.answers[i] === item.answer).length;
+  if (state.screen === "locator") {
+    state.locatorCorrect = correct;
+    state.locatorTotal = state.items.length;
+    state.level = placeLevel(correct);
+    state.screen = "level";
+    savePrefs();
+    render();
+    return;
+  }
+  if (state.screen === "rehearsal") {
+    state.rehearsalCorrect = correct;
+    state.rehearsalTotal = state.items.length;
+    state.screen = "ready";
+    render();
+    return;
+  }
   state.finishedOn = new Date();
   state.screen = "result";
   state.resultPage = 0;
@@ -340,7 +402,9 @@ function bind() {
   app.querySelectorAll("[data-level]").forEach((btn) => btn.addEventListener("click", () => { state.level = btn.dataset.level; savePrefs(); render(); }));
   app.querySelectorAll("[data-count]").forEach((btn) => btn.addEventListener("click", () => { state.count = Number(btn.dataset.count); savePrefs(); render(); }));
   app.querySelectorAll("[data-mode]").forEach((btn) => btn.addEventListener("click", () => { state.mode = btn.dataset.mode; savePrefs(); render(); }));
-  document.getElementById("start")?.addEventListener("click", start);
+  document.getElementById("start")?.addEventListener("click", startLocator);
+  document.getElementById("to-rehearsal")?.addEventListener("click", startRehearsal);
+  document.getElementById("to-exam")?.addEventListener("click", startExam);
   document.getElementById("pause")?.addEventListener("click", () => {
     if (state.paused) {
       state.deadline = Date.now() + state.remainMs;
@@ -360,7 +424,7 @@ function bind() {
     if (blank && !confirm(`還有 ${blank} 題沒答。仍要交卷嗎？`)) return;
     finishTest();
   });
-  document.getElementById("again")?.addEventListener("click", start);
+  document.getElementById("again")?.addEventListener("click", startLocator);
   document.getElementById("home")?.addEventListener("click", () => { state.screen = "home"; render(); });
   document.getElementById("toggle")?.addEventListener("click", () => { state.showAll = !state.showAll; render(); });
   document.getElementById("next-page")?.addEventListener("click", () => { state.resultPage = 1; render(); });
