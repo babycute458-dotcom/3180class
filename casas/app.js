@@ -70,6 +70,16 @@ function articles(level) {
   return (window.BANK || []).filter((item) => item.level === level);
 }
 
+function itemWeight(passage, question) {
+  if (question.weight) return question.weight;
+  const base = { A: 1, B: 2, C: 2, D: 3, E: 4 }[passage.level] || 2;
+  return /mean|attitude|opinion|conclude|infer|mainly|purpose|assume|tone|suggest/i.test(question.q) ? base + 1 : base;
+}
+
+function rich(text) {
+  return String(text ?? "").split(/\[\[|\]\]/).map((part, i) => (i % 2 ? `<u>${esc(part)}</u>` : esc(part))).join("");
+}
+
 function inflate(passage, limit) {
   const questions = limit ? passage.questions.slice(0, limit) : passage.questions;
   return questions.map((question) => {
@@ -79,12 +89,14 @@ function inflate(passage, limit) {
       title: passage.title,
       by: passage.by || "",
       paragraphs: passage.paragraphs,
+      form: passage.form || null,
       right: passage.right || null,
       q: question.q,
       choices: choices.map((c) => c.text),
       answer: choices.findIndex((c) => c.ok),
       why: question.why,
       whyZh: question.whyZh,
+      weight: itemWeight(passage, question),
     };
   });
 }
@@ -131,27 +143,27 @@ function startLocator() {
   beginRound(items, "locator");
 }
 
-function startRehearsal() {
-  const pool = shuffle(articles(state.level));
-  state.rehearsalId = pool[0]?.id || "";
-  state.examIds = pool.slice(1, 3).map((item) => item.id);
-  beginRound(inflate(pool[0], 3), "rehearsal");
-}
-
 function startExam() {
-  const picked = articles(state.level).filter((item) => state.examIds.includes(item.id));
-  const items = picked.flatMap((passage) => inflate(passage));
+  const pool = shuffle(articles(state.level));
+  const items = [];
+  for (const passage of pool) {
+    if (items.length >= 25) break;
+    items.push(...inflate(passage).slice(0, 25 - items.length));
+  }
   beginRound(items, "exam");
 }
 
-function oneArticle(title, by, paragraphs) {
-  return `<article><h2 class="passage-title">${esc(title)}</h2>${by ? `<p class="byline">By ${esc(by)}</p>` : ""}${(paragraphs || []).map((p) => `<p class="passage">${esc(p)}</p>`).join("")}</article>`;
+function oneArticle(title, by, paragraphs, form) {
+  const table = form
+    ? `<table class="form-table">${form.map(([k, v]) => `<tr><th>${rich(k)}</th><td>${rich(v)}</td></tr>`).join("")}</table>`
+    : "";
+  return `<article><h2 class="passage-title">${esc(title)}</h2>${by ? `<p class="byline">By ${esc(by)}</p>` : ""}${table}${(paragraphs || []).map((p) => `<p class="passage">${rich(p)}</p>`).join("")}</article>`;
 }
 
 function passageHtml(item) {
-  const left = oneArticle(item.title, item.by, item.paragraphs);
+  const left = oneArticle(item.title, item.by, item.paragraphs, item.form);
   if (!item.right) return left;
-  return `<div class="pair">${left}${oneArticle(item.right.title, item.right.by, item.right.paragraphs)}</div>`;
+  return `<div class="pair">${left}${oneArticle(item.right.title, item.right.by, item.right.paragraphs, item.right.form)}</div>`;
 }
 
 function render() {
@@ -171,7 +183,7 @@ function renderHome() {
     <div class="home">
       <a class="back" href="../">回單字練習</a>
       <h1>CASAS eTests Online</h1>
-      <p class="lede">先做等級測驗，再做 3 題 Rehearsal，然後才進入正式考試。正式考是完整文章，不是一小段。</p>
+      <p class="lede">先做等級測驗，測完直接進入 25 題正式考試。簡單題配分較低，推論、態度和字義題配分較高。</p>
       <section class="panel">
         <label class="field">Name
           <input id="name" type="text" maxlength="40" value="${esc(state.name)}" placeholder="Your name" />
@@ -179,7 +191,7 @@ function renderHome() {
         <label class="field">ID
           <input id="sid" type="text" maxlength="12" value="${esc(state.sid)}" />
         </label>
-        <p class="fine">題庫有 ${articleCount} 篇文章。等級測驗決定 A 到 E，正式考再從那個等級隨機抽文章。Rehearsal 的 3 題不計分。</p>
+        <p class="fine">題庫有 ${articleCount} 篇。等級測驗決定 A 到 E，正式考從那個等級隨機抽 25 題。NRS 等級最高顯示到 6+，分數本身可以高過 236。</p>
         <button class="begin" id="start" type="button">Begin locator</button>
       </section>
     </div>`;
@@ -235,7 +247,7 @@ function renderTest() {
             <div class="track"><span style="width:${pct}%"></span></div>
             <div class="q-count"><b>${state.index + 1}</b><span>${state.items.length}</span></div>
           </div>
-          <p class="stem">${esc(item.q)}</p>
+          <p class="stem">${rich(item.q)}</p>
           <div class="choices-col">
             ${item.choices.map((text, i) => {
               let cls = picked === i ? "on" : "";
@@ -270,16 +282,8 @@ function finishTest() {
     state.locatorCorrect = correct;
     state.locatorTotal = state.items.length;
     state.level = placeLevel(correct);
-    state.screen = "level";
     savePrefs();
-    render();
-    return;
-  }
-  if (state.screen === "rehearsal") {
-    state.rehearsalCorrect = correct;
-    state.rehearsalTotal = state.items.length;
-    state.screen = "ready";
-    render();
+    startExam();
     return;
   }
   state.finishedOn = new Date();
@@ -323,21 +327,28 @@ function sendScore() {
   });
 }
 
-function practiceBand(pct) {
-  if (pct >= 95) return "exit";
-  if (pct >= 85) return "l6";
-  if (pct >= 75) return "l5";
-  if (pct >= 65) return "l4";
-  if (pct >= 55) return "l3";
-  if (pct >= 45) return "l2";
+function bandForScore(score) {
+  if (score >= 236) return "exit";
+  if (score >= 228) return "l6";
+  if (score >= 217) return "l5";
+  if (score >= 207) return "l4";
+  if (score >= 197) return "l3";
+  if (score >= 184) return "l2";
   return "l1";
+}
+
+function scaleScore() {
+  const range = { A: [168, 198], B: [186, 216], C: [202, 232], D: [214, 252], E: [224, 258] }[state.level] || [202, 232];
+  const earned = state.items.reduce((sum, item, i) => sum + (state.answers[i] === item.answer ? item.weight || 1 : 0), 0);
+  const possible = state.items.reduce((sum, item) => sum + (item.weight || 1), 0) || 1;
+  return Math.round(range[0] + (earned / possible) * (range[1] - range[0]));
 }
 
 function renderResult() {
   const total = state.items.length;
   const correct = state.items.filter((item, i) => state.answers[i] === item.answer).length;
-  const pct = total ? Math.round((correct / total) * 100) : 0;
-  const here = practiceBand(pct);
+  const score = scaleScore();
+  const here = bandForScore(score);
   const when = (state.finishedOn || new Date());
   const date = `${String(when.getMonth() + 1).padStart(2, "0")}/${String(when.getDate()).padStart(2, "0")}/${when.getFullYear()}`;
   if (state.resultPage === 0) {
@@ -352,10 +363,10 @@ function renderResult() {
         </div>
         <table class="score-table">
           <tr>
-            <th>Modality</th><th>Test Form</th><th>Test Level</th><th>Test Date</th><th>Practice Score</th><th>Items Correct</th>
+            <th>Modality</th><th>Test Form</th><th>Test Level</th><th>Test Date</th><th>Scale Score</th><th>NRS Level</th>
           </tr>
           <tr>
-            <td>Reading</td><td>Practice</td><td>${esc(state.level)}</td><td>${date}</td><td>${pct}%</td><td>${correct} / ${total}</td>
+            <td>Reading</td><td>Practice</td><td>${esc(state.level)}</td><td>${date}</td><td>${score}</td><td>${here === "exit" ? "Exit 6" : here.replace("l", "")}</td>
           </tr>
         </table>
         <div class="score-visual">
@@ -363,7 +374,7 @@ function renderResult() {
             <h2>ESL<br>NRS Level</h2>
             ${BANDS.map(([id, label, cut]) => `<div class="band ${id} ${id === here ? "here" : ""}"><span>${label}</span><small>${cut}</small></div>`).join("")}
           </div>
-          <div class="burst-wrap"><span class="point">←</span><div class="burst"><div><span>Today's Practice Score</span><b>${pct}%</b><span>${correct}/${total}</span></div></div></div>
+          <div class="burst-wrap"><span class="point">←</span><div class="burst"><div><span>Today's Test Score</span><b>${score}</b><span>${correct}/${total}</span></div></div></div>
         </div>
         <div class="pager">
           <button id="home" type="button">Levels</button>
@@ -389,7 +400,7 @@ function renderResult() {
         <article class="review">
           <p class="${picked === item.answer ? "ok" : "miss"}">${picked === item.answer ? "Correct" : "Review"} · ${i + 1}</p>
           ${passageHtml(item)}
-          <h3>${esc(item.q)}</h3>
+          <h3>${rich(item.q)}</h3>
           <p>Your answer: ${picked == null ? "—" : esc(item.choices[picked])}</p>
           <p>Answer: ${esc(item.choices[item.answer])}</p>
           <p class="fine">${esc(item.why)} ${esc(item.whyZh || "")}</p>
@@ -404,8 +415,6 @@ function bind() {
   app.querySelectorAll("[data-count]").forEach((btn) => btn.addEventListener("click", () => { state.count = Number(btn.dataset.count); savePrefs(); render(); }));
   app.querySelectorAll("[data-mode]").forEach((btn) => btn.addEventListener("click", () => { state.mode = btn.dataset.mode; savePrefs(); render(); }));
   document.getElementById("start")?.addEventListener("click", startLocator);
-  document.getElementById("to-rehearsal")?.addEventListener("click", startRehearsal);
-  document.getElementById("to-exam")?.addEventListener("click", startExam);
   document.getElementById("pause")?.addEventListener("click", () => {
     if (state.paused) {
       state.deadline = Date.now() + state.remainMs;

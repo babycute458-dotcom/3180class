@@ -157,7 +157,7 @@ input[type="text"] {
   color: #2f343a;
 }
 
-.byline { margin: -8px 0 14px; color: #6d7782; font-size: 14px; }
+.passage u, .form-table u, .stem u, .review h3 u { text-decoration: underline; text-underline-offset: 2px; }
 .passage {
   margin: 0 0 14px;
   font-family: Georgia, "Noto Serif TC", serif;
