@@ -44,6 +44,18 @@ var LOCATOR = [
       { q: "Both writers assume that temporary work can be useful when a worker does what?", choices: ["Refuses any job that is not permanent", "Uses the job to learn and keeps looking beyond it", "Stays in the same temporary role for many years", "Avoids asking about permanent openings"], answer: 1, why: "Lin and Yu both treat temporary work as a step, not a place to stop.", whyZh: "兩人都把短期工作當跳板，不是終點。" },
       { q: "How is Yu's advice different from Lin's?", choices: ["Yu says temporary work is never acceptable.", "Yu tells the worker to set a date to move on.", "Lin wants workers to hide their temporary jobs.", "Yu focuses only on asking for a raise."], answer: 1, why: "Yu specifically says to set a date, learn the work, then apply or leave.", whyZh: "Yu 要人先定一個日期，學完再申請正式職或缺席離開。" }
     ]
+  },
+  {
+    id: "L4", level: "E", title: "What the Numbers Leave Out", by: "Helen Cho",
+    paragraphs: [
+      "A city report announced that bus ridership had grown by 8 percent in one year. Officials treated the figure as proof that the new routes were a success. Cho argues that a single percentage can hide who was actually able to ride. Growth concentrated in two downtown lines does not show whether night-shift workers, or people transferring twice, were served any better.",
+      "She compares the report with rider complaints from the same months. The complaints did not fall. They moved. Riders wrote less about crowded morning buses and more about buses that left early, missed transfers, and stops with no shelter. A system can carry more people and still waste the time of the people who have the least choice about when they travel.",
+      "Cho does not ask the city to ignore the increase. She asks it to publish the number next to two others: the share of trips that required more than one bus, and the share of scheduled night trips that never arrived. Without those figures, she writes, the 8 percent is an advertisement rather than an explanation."
+    ],
+    questions: [
+      { q: "What is Cho's main criticism of the 8 percent figure?", choices: ["It was calculated incorrectly.", "It hides who benefited and what got worse.", "It proves ridership fell.", "It counts only night buses."], answer: 1, why: "She says one percentage can hide who was served and which problems grew.", whyZh: "她認為單一百分比看不出誰受惠、哪些問題變嚴重。" },
+      { q: "What does Cho want published along with the ridership increase?", choices: ["Only the names of city officials", "The share of trips with a transfer and the share of night trips that never arrived", "A list of every rider's job", "The cost of printing new maps"], answer: 1, why: "She names those two figures as necessary context.", whyZh: "她要同時公布轉乘比例，以及夜間班次沒來的比例。" }
+    ]
   }
 ];
 
@@ -233,6 +245,222 @@ var BANK = [
       { q: "Why was Jerome still paired with a trainer?", choices: ["He missed the signup date.", "A supervisor remembered him rushing.", "He refused the certificate.", "Nina asked for his help."], answer: 1, why: "A supervisor had once seen him rush, and that memory kept him with a trainer.", whyZh: "主管記得他曾經趕工，所以他還得跟著教練。" },
       { q: "What does Hale recommend for announcing benefits?", choices: ["A poster is enough.", "Put the notice in the same message as the weekly schedule.", "Tell only certified workers.", "Announce it after the class ends."], answer: 1, why: "He says a fairer notice would travel with the weekly schedule.", whyZh: "他認為比較公平的做法是跟每週班表一起通知。" },
       { q: "Which statement matches Hale's conclusion?", choices: ["April's reports showed no improvement.", "A certificate proves the workplace treated everyone fairly.", "Training reduced damage, but it did not guarantee a fair chance.", "Longer employees should not be trained."], answer: 2, why: "Damage reports fell, yet Hale says a certificate is not proof of a fair chance.", whyZh: "損壞報告變少了，但證書不能證明每個人都有公平的練習機會。" }
+    ]
+  },
+  {
+    id: "A4", level: "A", title: "The Library Card", by: "Amy Brooks",
+    paragraphs: [
+      "Sam wanted a library card so he could borrow books for his English class. He went to the library on Saturday at 11:00 a.m. A sign said new cards are made from 10:00 a.m. to 2:00 p.m. on Saturdays. He had arrived in time.",
+      "The clerk asked for a photo ID and a piece of mail with his address. Sam had his ID, but he did not have the mail. The clerk said he could not finish the card that day. She gave him a form and told him to come back with the mail.",
+      "Sam went home and found an electric bill. On Monday after work he returned to the library. The clerk checked the bill, typed his name, and printed a card. She said he could borrow three books at a time. The books were due in three weeks.",
+      "Sam chose two easy readers and one book about buses in the city. He wrote the due date, the second Monday, on his phone. The clerk said he could renew the books online if nobody else was waiting. If a book was late, the fee was 25 cents a day."
+    ],
+    questions: [
+      { q: "Why did Sam have to come back on Monday?", choices: ["The library was closed on Saturday.", "He did not have mail with his address.", "He already had three books.", "The card machine was broken."], answer: 1, why: "He had an ID but not a piece of mail, so the card could not be finished.", whyZh: "他有證件，但沒有寫地址的信件，所以當天辦不成。" },
+      { q: "How many books may Sam borrow at one time?", choices: ["One", "Two", "Three", "Ten"], answer: 2, why: "The clerk said he could borrow three books at a time.", whyZh: "館員說一次可以借三本。" },
+      { q: "When are the books due?", choices: ["The next day", "In three days", "In three weeks", "In three months"], answer: 2, why: "The books were due in three weeks.", whyZh: "書要三週後還。" },
+      { q: "What is the late fee?", choices: ["25 cents a day", "$1 a week", "$3 a book", "There is no fee."], answer: 0, why: "A late book costs 25 cents a day.", whyZh: "逾期一天 25 美分。" }
+    ]
+  },
+  {
+    id: "A5", level: "A", title: "Lunch at Work", by: "Kenji Sato",
+    paragraphs: [
+      "The hotel where Noor works serves lunch to the staff from 11:30 a.m. to 1:00 p.m. Workers must eat in the break room, not at the front desk. Each person gets one plate. Extra fruit is free, but soda costs one dollar.",
+      "On Thursday the cook posted a menu. The meal was rice, chicken, and salad. A note said the chicken was spicy. Noor does not eat spicy food, so she asked for the salad and rice only. The cook said that was fine.",
+      "Noor's supervisor reminded the group about leftovers. Food left in the refrigerator after Thursday night is thrown away on Friday morning. Names must be written on every box. A box with no name is thrown away the same day.",
+      "Noor ate, washed her cup, and went back to the lobby at 12:20 p.m. She still had ten minutes, but a guest was waiting with a question about the airport bus. She helped the guest and then clocked back in. Her supervisor thanked her for not leaving the guest standing alone."
+    ],
+    questions: [
+      { q: "Where must staff eat lunch?", choices: ["At the front desk", "In the break room", "In the guest dining room", "Outside the hotel"], answer: 1, why: "Workers must eat in the break room.", whyZh: "員工要在休息室吃午餐。" },
+      { q: "Why did Noor skip the chicken?", choices: ["It cost one dollar.", "It was spicy.", "There was no rice.", "Lunch was over."], answer: 1, why: "The note said the chicken was spicy, and she does not eat spicy food.", whyZh: "雞肉是辣的，她不吃辣。" },
+      { q: "What happens to food left after Thursday night?", choices: ["It is served on Saturday.", "It is thrown away on Friday morning.", "It is sold to guests.", "It is sent home with the cook."], answer: 1, why: "Leftovers are thrown away on Friday morning.", whyZh: "星期四晚上留下的食物，星期五早上會丟掉。" },
+      { q: "What did Noor do before she clocked back in?", choices: ["She bought a soda.", "She helped a guest who had a question.", "She ate the chicken.", "She labeled a box."], answer: 1, why: "She helped a guest asking about the airport bus, then clocked back in.", whyZh: "她先幫客人問機場巴士，再打卡回去上班。" }
+    ]
+  },
+  {
+    id: "B4", level: "B", title: "The School Picture Day", by: "Marisol Vega",
+    paragraphs: [
+      "The elementary school sent a letter home about picture day. Photos will be taken on Wednesday, October 12, in the gym. Children should arrive in the clothes they want in the picture. The school will not provide extra shirts.",
+      "Orders are due on October 10. A family that wants prints must return the form with payment. Cash and checks are accepted. The office cannot take card payments that week because the card machine will be in the gym. Packages start at $15.",
+      "If a child is absent, there is a makeup day on October 20 before school. Parents must call the office by October 18 to reserve a place. The makeup photos are only for children who missed the first day, not for children who want a second pose.",
+      "The letter also asks families not to send children with large hair bows or toys. Those items make it hard to see faces. Glasses should be worn if the child wears them every day. The photographer will send the prints home in about three weeks."
+    ],
+    questions: [
+      { q: "When is picture day?", choices: ["October 10", "October 12", "October 18", "October 20"], answer: 1, why: "Photos will be taken on Wednesday, October 12.", whyZh: "拍照日是 10 月 12 日。" },
+      { q: "Why can't the office take cards that week?", choices: ["Cards are never allowed.", "The card machine will be in the gym.", "The photos are free.", "The bank is closed."], answer: 1, why: "The card machine will be in the gym.", whyZh: "刷卡機那週會放在體育館。" },
+      { q: "Who may use the makeup day?", choices: ["Any child who wants another photo", "Only children who missed October 12", "Only teachers", "Parents"], answer: 1, why: "Makeup photos are only for children who missed the first day.", whyZh: "補拍只給錯過第一天的孩子。" },
+      { q: "What should a child wear in the photo if they use glasses every day?", choices: ["Sunglasses", "No glasses", "Their regular glasses", "A large hair bow"], answer: 2, why: "Glasses should be worn if the child wears them every day.", whyZh: "每天都戴眼鏡的話，拍照也要戴。" }
+    ]
+  },
+  {
+    id: "B5", level: "B", title: "A Notice about Parking", by: "City Lot B",
+    paragraphs: [
+      "Lot B behind the clinic will be closed this Friday so workers can paint the lines. Staff and visitors should park on 5th Street. The street spaces are free for two hours. Cars left longer than two hours may get a ticket between 8:00 a.m. and 6:00 p.m.",
+      "Patients who need more than two hours should tell the front desk when they arrive. The clerk can give a dashboard card for clinic visits. The card is not for shopping or for people who do not have an appointment. It must be placed face up.",
+      "The clinic's side door will stay open. The back door near Lot B will be locked because painters will use that entrance. Anyone who usually enters from the lot should walk around to the side door. Wheelchairs can use the ramp there.",
+      "Painting should finish by 4:00 p.m. If the paint is still wet, the lot will stay closed until Saturday morning. The clinic will post an update on the door at 3:30 p.m. Drivers should read that note before they try to enter the lot on Friday afternoon."
+    ],
+    questions: [
+      { q: "Where should people park on Friday?", choices: ["Lot B", "5th Street", "Inside the clinic", "The back door"], answer: 1, why: "The notice says to park on 5th Street.", whyZh: "星期五要改停在第五街。" },
+      { q: "Who can get a dashboard card?", choices: ["Any shopper", "Patients who tell the front desk they need more than two hours", "Painters only", "People without an appointment"], answer: 1, why: "Patients with a longer visit can ask the front desk for a card.", whyZh: "看診超過兩小時的病人可以跟櫃檯要卡片。" },
+      { q: "Why is the back door locked?", choices: ["The ramp is broken.", "Painters will use that entrance.", "The clinic is closed.", "Tickets are sold there."], answer: 1, why: "Painters will use the back entrance, so it will be locked for others.", whyZh: "油漆工会用後門，所以後門會鎖上。" },
+      { q: "What should drivers do before entering the lot on Friday afternoon?", choices: ["Ignore the door", "Read the update posted at 3:30 p.m.", "Call the paint company", "Park in the lobby"], answer: 1, why: "An update will be posted on the door at 3:30 p.m.", whyZh: "下午 3:30 門上會貼最新消息，要先看。" }
+    ]
+  },
+  {
+    id: "C4", level: "C", title: "The Overtime Question", by: "Daniel Reeves",
+    paragraphs: [
+      "In April the shipping office asked for volunteers to work on the last Saturday of the month. The note promised time and a half after 40 hours. Several workers signed up because they wanted the extra pay. By Friday, two of them had already worked 40 hours, and three had worked only 32.",
+      "The supervisor, Ms. Alvarez, explained the difference in a short meeting. The Saturday shift was eight hours for everyone. Only the workers who were already at 40 hours would earn overtime for those eight hours. The others would earn their regular rate until they crossed 40, and overtime only after that.",
+      "One worker, Ben, had thought the whole Saturday was overtime because it was a weekend. Ms. Alvarez said the company does not pay extra just because the day is Saturday. The rule follows weekly hours, not the name of the day. She showed a sample stub: 40 hours at $16, then 8 hours at $24.",
+      "Ben decided to work anyway. He would reach overtime after the first eight hours of the week were filled, which for him meant the last four hours on Saturday. He wrote the numbers down so he would not expect a larger check than the rule allowed. Ms. Alvarez asked everyone to do the same before they agreed to an extra shift."
+    ],
+    questions: [
+      { q: "When does overtime start at this company?", choices: ["On every Saturday hour", "After 40 hours in the week", "After 32 hours", "Only in April"], answer: 1, why: "Overtime follows weekly hours and starts after 40.", whyZh: "加班費是看一週工時，超過 40 小時才開始。" },
+      { q: "Why wouldn't Ben's whole Saturday be overtime?", choices: ["He had not yet worked 40 hours that week.", "The office was closed.", "Saturday shifts are unpaid.", "He refused the shift."], answer: 0, why: "He still had regular hours left before he crossed 40.", whyZh: "他那週還沒滿 40 小時，所以星期六不會整段都算加班。" },
+      { q: "On the sample stub, what is the overtime rate?", choices: ["$16", "$20", "$24", "$40"], answer: 2, why: "The sample shows 8 hours at $24 after 40 hours at $16.", whyZh: "例子裡加班時薪是 24 元。" },
+      { q: "What did Ms. Alvarez want workers to do before taking an extra shift?", choices: ["Ignore the stub", "Write down how the hours would be paid", "Work 32 hours only", "Skip Saturday"], answer: 1, why: "She asked them to write the numbers down so the paycheck would not be a surprise.", whyZh: "她要大家先把時數和算法寫下來。" }
+    ]
+  },
+  {
+    id: "C5", level: "C", title: "Returning the Lamp", by: "Store Policy Desk",
+    paragraphs: [
+      "A customer bought a lamp online and it arrived broken. She wrote to the store the same day and attached two photos. The store replied that it was sorry and would refund $20 to her card. The message said the refund could take five business days to appear. It did not offer a new lamp.",
+      "The customer asked whether she had to mail the broken lamp back. A second email said yes, and it included a label. The lamp had to be packed in the original box if she still had it. If she did not, a sturdy box was acceptable. The return had to be dropped off within 14 days or the refund could be canceled.",
+      "She also asked about the delivery fee. The original order was $42, so delivery had been free because the store waives the fee over $40. The refund of $20 did not change that past delivery. The store would not charge her a new delivery fee for sending the broken item back.",
+      "The last line of the email asked her to keep the receipt number until the refund showed on her statement. If five business days passed with no credit, she should write again and include that number. Calling the local shop would not help, because online returns are handled by a different office."
+    ],
+    questions: [
+      { q: "What did the store agree to do?", choices: ["Send a new lamp the same day", "Refund $20 within about five business days", "Close her account", "Charge $20 more"], answer: 1, why: "The store promised a $20 refund, not a replacement.", whyZh: "商店答應退 20 元，不是換一盞新的。" },
+      { q: "What could cancel the refund?", choices: ["Using a sturdy box", "Dropping off the return after 14 days", "Keeping the receipt number", "Writing on the same day"], answer: 1, why: "The return had to be dropped off within 14 days.", whyZh: "超過 14 天沒寄回，退款可能取消。" },
+      { q: "Why was the original delivery free?", choices: ["All lamps ship free.", "The order was over $40.", "The lamp was broken.", "She paid a $20 fee."], answer: 1, why: "Delivery is free on orders over $40, and her order was $42.", whyZh: "訂單超過 40 元就免運，她的是 42 元。" },
+      { q: "Who handles the online return?", choices: ["The local shop", "A different office from the local shop", "The delivery driver only", "The customer's bank"], answer: 1, why: "Online returns are handled by a different office, so calling the local shop will not help.", whyZh: "網路退貨由另一個部門處理，打給本地店沒有用。" }
+    ]
+  },
+  {
+    id: "D4", level: "D", title: "Who Gets the Interview", by: "Naomi Brooks",
+    right: {
+      title: "A Test Is Not a Conversation", by: "Victor Lang",
+      paragraphs: [
+        "Lang accepts that a short skills test can show whether a person can use a register or read a schedule. He objects when the test replaces the conversation. A score, he writes, cannot show whether someone will ask for help before a mistake becomes expensive.",
+        "He describes a candidate who scored in the middle but explained, clearly, how she had handled a missing label at a warehouse. The panel almost passed over her because another candidate scored higher and said less. Lang says the quieter high score was easier to rank and harder to trust.",
+        "His suggestion is modest. Use the test to decide who is able to do the basic tasks. Use the interview to decide who can be taught. A workplace that reverses those steps will keep hiring people who look ready on paper and then need the same warning twice."
+      ]
+    },
+    paragraphs: [
+      "Brooks studied how a grocery chain chose cashiers. Every applicant took the same ten-minute reading test. Anyone below a cutoff was rejected before a person spoke with them. The company said the rule saved time and treated every applicant alike.",
+      "Brooks found a pattern the cutoff hid. Applicants who had worked in busy stores, but who read slowly on a timer, were rejected more often than applicants with no retail experience and faster test scores. The test measured speed under pressure. It did not measure whether the person had already done the job.",
+      "She does not argue for throwing the test away. She argues for using it after a short conversation, not before one. A five-minute talk would have shown which slow readers already knew how to handle a line of customers. The chain's rule made that information impossible to collect."
+    ],
+    questions: [
+      { q: "What is Brooks's main objection to the cutoff?", choices: ["The test was too short to print.", "It rejected experienced workers who read slowly before anyone spoke with them.", "It favored people with no reading skills.", "It was given after the interview."], answer: 1, why: "People were rejected on speed before a conversation could show their experience.", whyZh: "還沒談話，就因讀得慢被刷掉，經驗因此看不到。" },
+      { q: "What does Lang think a test score cannot show?", choices: ["Whether someone can read a schedule", "Whether someone will ask for help in time", "How long the test was", "The name of the store"], answer: 1, why: "He says a score cannot show whether a person will ask for help before a mistake grows.", whyZh: "分數看不出這個人會不會在出錯前先求助。" },
+      { q: "What hiring order do both writers prefer?", choices: ["Test only, with no interview", "Interview only, with no test", "Use the test for basic ability and a conversation to judge who can be taught", "Hire the fastest reader every time"], answer: 2, why: "Brooks wants a talk before the cutoff binds, and Lang wants the test for basics and the interview for teachability.", whyZh: "兩人都要測驗看基本能力，再用談話判斷誰學得會。" },
+      { q: "Why did the panel almost skip Lang's example candidate?", choices: ["She refused the test.", "Another person scored higher and spoke less.", "She had never worked.", "The interview was canceled."], answer: 1, why: "A higher score that came with less explanation was easier to rank.", whyZh: "另一個人分數較高、話說得少，比較容易被排在前面。" }
+    ]
+  },
+  {
+    id: "D5", level: "D", title: "The Night Class", by: "Irene Park",
+    paragraphs: [
+      "The community college added a night section of the writing course after day classes filled in the first week. The night section met from 6:30 p.m. to 9:00 p.m. twice a week. Instructors used the same assignments, but the night students were, on average, ten years older and more likely to arrive from a job.",
+      "Park sat in on both sections for a month. Day students asked more questions during the lesson. Night students asked fewer questions in class and more questions in the last ten minutes, often about a form their employer wanted the next morning. The night instructor began ending the lesson at 8:45 p.m. so those questions would not be rushed in the doorway.",
+      "The college then considered cutting the night section because its quiz average was six points lower. Park argued that the average compared people who had studied in the afternoon with people who had stood at work until 5:30 p.m. A lower average did not prove the section was careless. It proved the comparison was incomplete.",
+      "The dean kept the section for one more term and added a quiet room that opened at 5:45 p.m. Students could eat and review the assignment before class. Park's follow-up the next term found that the quiz gap had narrowed, and that fewer students left at the break. She treats that result as evidence about time, not about talent."
+    ],
+    questions: [
+      { q: "Why did the college add the night section?", choices: ["Day teachers refused the course.", "Day classes filled in the first week.", "Night students scored higher.", "The dean wanted a longer day."], answer: 1, why: "The night section was added after day classes filled.", whyZh: "日間班第一週就額滿，才加開夜間班。" },
+      { q: "Why did the night instructor end the lesson at 8:45 p.m.?", choices: ["The building closed at 8:00.", "So work-related questions would not be rushed at the door", "Quizzes were canceled.", "Students asked fewer questions."], answer: 1, why: "The last minutes were when night students asked about forms their jobs needed.", whyZh: "她提早結束，是為了留時間回答和工作有關的問題。" },
+      { q: "What did Park think the lower quiz average showed?", choices: ["The night section was careless.", "The comparison ignored the students' work schedules.", "Day students did not study.", "The assignments were different."], answer: 1, why: "She said the average compared afternoon study with people who had worked until 5:30.", whyZh: "她認為平均分數忽略了夜間學生下班後才來上課。" },
+      { q: "What is the best conclusion from the follow-up?", choices: ["Talent, not time, explained the gap.", "Giving students time before class was connected to a smaller gap.", "The section should have been cut.", "Quizzes were removed."], answer: 1, why: "After a quiet room opened before class, the gap narrowed and fewer students left.", whyZh: "上課前有安靜的地方可用之後，分數差距縮小了。" }
+    ]
+  },
+  {
+    id: "E1", level: "E", title: "A Raise That Was Not a Raise", by: "Olivia Grant",
+    right: {
+      title: "Count the Hours, Not the Poster", by: "Seth Marin",
+      paragraphs: [
+        "Marin tells workers to distrust a poster that advertises a new hourly rate without a sample week. A rate is a promise about one hour. A paycheck is a record of how many of those hours the schedule actually contains.",
+        "He describes a store that raised pay by one dollar and then cut most employees from 32 hours to 24. The poster was accurate and the week was poorer. Workers who compared only the rate felt they had gained. Workers who multiplied rate by hours saw the loss before the first new stub arrived.",
+        "Marin's advice is blunt. Ask for the expected hours in writing. If the answer is a range, ask which end of the range is typical in a slow month. A raise that depends on a busy season is not the same offer in January as it is in July."
+      ]
+    },
+    paragraphs: [
+      "Grant followed a group of home-care aides after their agency announced a one-dollar raise. The aides were pleased until the new schedules arrived. Several had been working 35 hours. The new sheets gave them 27. The agency said the change was about client need, not about the raise. Grant does not accuse anyone of lying. She shows that the two changes landed in the same week, and that the aides experienced them as one decision.",
+      "One aide, Ruth, earned more per hour and less per week. Her bus pass, which she bought because the old schedule justified it, now cost a larger share of a smaller check. Grant uses Ruth's week to argue that compensation is a pattern, not a rate. A figure on a poster can rise while the life built around the job becomes harder to pay for.",
+      "Grant's conclusion is aimed at people who announce pay. If a raise will be paired with fewer hours, say both things in the same sentence. Workers can accept a trade they understand. They cannot plan around a celebration that omits the cut."
+    ],
+    questions: [
+      { q: "What did the aides discover in the same week as the raise?", choices: ["Their hourly pay fell.", "Many of their weekly hours were cut.", "The agency closed.", "Bus passes became free."], answer: 1, why: "Several schedules dropped from about 35 hours to 27.", whyZh: "同一週，不少人的每週工時從大約 35 小時降到 27。" },
+      { q: "Why does Grant say Ruth's raise was not simply a gain?", choices: ["Ruth refused the new rate.", "Her weekly pay fell, so fixed costs took a larger share.", "The poster was false.", "She stopped taking the bus."], answer: 1, why: "She earned more per hour but less per week, and the bus pass took more of that smaller check.", whyZh: "時薪變高，但週薪變少，固定開銷占比更高。" },
+      { q: "What does Marin want workers to multiply?", choices: ["The old rate by the new rate", "The hourly rate by the hours they can actually expect", "Tips by the number of clients", "The poster size by the staff list"], answer: 1, why: "He says a paycheck is rate times the hours the schedule really contains.", whyZh: "他要人用時薪乘上實際排得到的時數。" },
+      { q: "Which practice do both writers want from an employer?", choices: ["Announce the rate and hide the hours.", "State the pay change and the likely hours together.", "Give every worker 40 hours.", "Remove written schedules."], answer: 1, why: "Grant wants both facts in one sentence, and Marin wants expected hours in writing beside the rate.", whyZh: "兩人都要公司把時薪和可能的工時一起講清楚。" }
+    ]
+  },
+  {
+    id: "E2", level: "E", title: "The Shelter Rule", by: "Naomi Ellis",
+    paragraphs: [
+      "When the city closed a downtown shelter for repairs, it promised beds at two sites farther out. The promise was kept in a narrow sense. The beds existed. What the city did not publish was the last bus that could reach either site. For one location, that bus left downtown at 7:10 p.m. Anyone who finished a shift after that time could not arrive by transit.",
+      "Ellis interviewed people who tried anyway. Some paid for a rideshare they could not repeat. Some walked. One man missed the bed because the site stopped intake at 9:00 p.m., even though the city's flyer said beds were available all night. The flyer was not exactly false. Intake ended. A cot might still be empty. The distinction mattered only to people who had the flyer and not the rule.",
+      "A council member defended the move by pointing to the number of beds. Ellis replies that a bed no one can reach is not the same public good as a bed on a working route. She asks the city to print three facts on the next flyer: the last transit trip, the intake deadline, and whether a person who arrives later will be turned away or placed on a wait list.",
+      "The repairs downtown were expected to take four months. Ellis notes that four months is long enough to build a habit of not going. If the reopened shelter then looks underused, the city may treat that as evidence that the beds were not needed. She calls that a circular proof. People were trained by the schedule to stop appearing, and their absence was then used to explain the policy."
+    ],
+    questions: [
+      { q: "In what sense was the city's promise kept?", choices: ["Every worker could reach a bed by bus.", "The beds existed at the new sites.", "Intake stayed open all night.", "The downtown shelter never closed."], answer: 1, why: "Ellis says the beds existed, which is the narrow sense in which the promise was kept.", whyZh: "她說床位確實有，這是承諾被遵守的狹義意思。" },
+      { q: "Why does Ellis say the flyer was misleading even if it was not exactly false?", choices: ["It used the wrong address.", "It said beds were available all night, while intake ended at 9:00 p.m.", "It denied that buses were running.", "It promised jobs."], answer: 1, why: "A cot might remain empty after intake closed, so 'available all night' skipped the rule that mattered.", whyZh: "傳單說整夜有床，但晚上 9 點就停止收容。" },
+      { q: "What three facts does she want on the next flyer?", choices: ["Repair costs, staff names, and meal times", "The last bus, the intake deadline, and what happens to a late arrival", "Only the number of beds", "A map of downtown shops"], answer: 1, why: "She lists the last transit trip, the intake deadline, and whether a late person is turned away or wait-listed.", whyZh: "她要末班車、收容截止時間，以及晚到的人會被拒絕還是候補。" },
+      { q: "What does she mean by a circular proof?", choices: ["The city measured a circle of streets.", "People stopped coming because of the schedule, and that absence was then used to justify the policy.", "Repairs proved the beds were unsafe.", "Riders preferred to walk."], answer: 1, why: "Underuse caused by the schedule would later be cited as proof the beds were unnecessary.", whyZh: "時刻表讓人不再來，缺席又被拿來證明床位不需要。" }
+    ]
+  },
+  {
+    id: "E3", level: "E", title: "Reading the Safety Report", by: "Claire Dunn",
+    paragraphs: [
+      "The plant's annual safety report opened with a sentence the managers liked: recordable injuries had fallen by 15 percent. Dunn read the appendix. The fall was real, and it was also concentrated in one category, slips in the parking lot, after a winter when almost no ice formed. Injuries on the line had not fallen. Two types had risen.",
+      "The report's charts made the rise easy to miss. They used a scale that started at zero and ended at a number high enough to flatten small changes. A reader who looked only at the shape of the bars would think the year had been quiet. A reader who looked at the table underneath would see cuts and repetitive-strain cases moving in the other direction from the headline.",
+      "Dunn spoke with three workers who had stopped reporting minor cuts. They had not been told to lie. They had learned that a report triggered a meeting that ran past the end of the shift, unpaid. The injury still happened. It left the spreadsheet. Dunn argues that a safer-looking year can be produced by paperwork as well as by safer work.",
+      "She proposes a dull reform. Publish the headline number beside the count of each injury type, and pay workers for the time a report requires. A meeting that costs people their evening will train them to keep quiet. A meeting that is part of the paid day will collect the information the headline claims to represent."
+    ],
+    questions: [
+      { q: "Why is the 15 percent drop an incomplete headline?", choices: ["The number was invented.", "It came mostly from fewer parking-lot slips, while some line injuries rose.", "Injuries doubled on every line.", "The report had no tables."], answer: 1, why: "The drop was concentrated in parking-lot slips after a mild winter, not in line injuries.", whyZh: "下降主要來自停車場滑倒變少，產線上有些傷害其實增加。" },
+      { q: "How did the charts hide the rise?", choices: ["They omitted the year.", "The scale flattened small changes so the bars looked quiet.", "They were printed in the wrong language.", "They showed only worker names."], answer: 1, why: "A scale from zero to a high number made smaller increases look flat.", whyZh: "座標拉得很高，較小的增加看起來就像沒變化。" },
+      { q: "Why did some workers stop reporting minor cuts?", choices: ["They were ordered to lie.", "A report led to an unpaid meeting after the shift.", "Cuts were no longer possible.", "The forms were removed."], answer: 1, why: "The meeting ran past the shift and was unpaid, so people learned not to report.", whyZh: "填報之後要開無薪會議，而且會拖過下班時間。" },
+      { q: "What reform does Dunn want?", choices: ["Stop publishing injury numbers.", "Show each injury type and pay workers for the time a report takes.", "Hold meetings only in the parking lot.", "Count slips and ignore everything else."], answer: 1, why: "She wants the headline next to each injury type, and paid time for reporting.", whyZh: "她要標題數字旁邊列出各類傷害，並把填報時間算進有薪工時。" }
+    ]
+  },
+  {
+    id: "E4", level: "E", title: "The Language of the Handbook", by: "Maya Feldman",
+    paragraphs: [
+      "The employee handbook said vacation was available after ninety days. New workers read that sentence as a promise. Feldman shows how the next paragraph quietly narrowed it. Vacation could be requested after ninety days, but it could be denied during the first six months if the department called the period a training season. The first sentence was not false. It was incomplete in a way that favored the employer.",
+      "She collected questions that new hires asked in their first month. Most of them were about the sentences that sounded absolute: 'must,' 'always,' and 'available.' In the handbook, those words were often followed, paragraphs later, by an exception. Workers who read only the bold line made plans. Workers who read the exception did not.",
+      "Feldman does not treat this as a plot. She treats it as a design. Bold lines are easy to translate and easy to remember. Exceptions are written in longer sentences and printed in the same gray as the page. A worker reading English as a second language is more likely to keep the bold line and miss the limit attached to it.",
+      "Her recommendation is concrete. Put the exception in the same sentence as the promise, and put both in the language the worker used at hiring. A right that appears only in the third paragraph is still a company rule. It is not yet information the person can use."
+    ],
+    questions: [
+      { q: "How did the vacation rule mislead new workers?", choices: ["It never mentioned vacation.", "The first sentence sounded like a promise, and a later paragraph allowed denials.", "Vacation started on the first day.", "The handbook was not in English."], answer: 1, why: "Workers could request vacation after ninety days, but it could still be denied during training season.", whyZh: "九十天後可以申請，但後面又允許在訓練期拒絕。" },
+      { q: "Why are exceptions easy to miss, according to Feldman?", choices: ["They are printed in bold.", "They come later, in longer sentences, in ordinary type.", "They are read aloud.", "They are translated first."], answer: 1, why: "Exceptions sit in longer sentences and in the same gray as the rest of the page.", whyZh: "例外寫在後面的長句裡，字體和內文一樣，不容易注意到。" },
+      { q: "Who is most likely to keep only the bold line?", choices: ["Lawyers for the company", "Workers reading English as a second language", "People who wrote the handbook", "Managers who deny vacation"], answer: 1, why: "She says a worker reading English as a second language is more likely to remember the bold line.", whyZh: "她說把英語當第二語言的人，比較容易只記住粗體那句。" },
+      { q: "What change does she recommend?", choices: ["Remove all vacation rules.", "State the promise and the exception in the same sentence, in the worker's language.", "Print only exceptions.", "Wait six months to give anyone a handbook."], answer: 1, why: "The exception should share the sentence with the promise, in the language used at hiring.", whyZh: "承諾和例外要寫在同一句，並用雇用時使用的語言。" }
+    ]
+  },
+  {
+    id: "E5", level: "E", title: "Two Memos about the Same Storm", by: "Laura Singh",
+    right: {
+      title: "What We Need from You Tonight", by: "Night Supervisor",
+      paragraphs: [
+        "The night memo was four lines. It told the evening crew to stay until the last truck left, to text a family member, and to take the company van if their own street was closed. It named a person, not a department, who would approve the extra hours.",
+        "It also said what would not be required. No one had to drive a personal car through standing water. Anyone who lived past the bridge could sleep in the break room. Those two sentences answered the questions people were already asking each other.",
+        "Singh does not claim the night memo was kinder because night workers are braver. She claims it was written by someone who would stand in the room when it was read. The morning memo was written by someone who would not."
+      ]
+    },
+    paragraphs: [
+      "On the morning of the storm, the company sent two messages. The morning memo was a page long. It reviewed the history of the building, thanked staff for their dedication, and said leadership was monitoring the weather. It did not say whether the afternoon shift should come in.",
+      "Singh places the two memos side by side because they were about the same hours and the same rain. One gave people a speech. The other gave them a decision. She argues that length is not clarity. The long memo used more words and left the only useful question unanswered.",
+      "Employees who received only the morning memo called the office. Many of those calls went to the night supervisor, who then wrote the short note. The extra work of the storm included rewriting a message that had already been sent. Singh counts that rewrite as a cost, even though it never appeared on a invoice."
+    ],
+    questions: [
+      { q: "What did the morning memo fail to say?", choices: ["That a storm existed", "Whether the afternoon shift should come in", "The name of the company", "That staff were appreciated"], answer: 1, why: "It reviewed the building and the weather but did not say if the afternoon shift should come in.", whyZh: "它講了大樓和天氣，卻沒說下午班要不要來。" },
+      { q: "What practical choices did the night memo give?", choices: ["A history of the building", "Stay for the last truck, use the van, and sleep in the break room if needed", "A demand to drive personal cars through water", "No instructions at all"], answer: 1, why: "It said to stay until the last truck, offered the van, and allowed sleeping in the break room.", whyZh: "它說等到最後一輛卡車，可以坐公司車，過不了橋的人可以睡休息室。" },
+      { q: "Why does Singh say the night memo worked better?", choices: ["It was longer.", "It was written by someone who would be in the room when it was read.", "It avoided naming a person.", "It thanked people more warmly."], answer: 1, why: "The night supervisor would stand there when the note was read; the morning writer would not.", whyZh: "夜班主管寫完還會在場，早班那封的作者不會。" },
+      { q: "What hidden cost does she count?", choices: ["The price of the van", "The time spent rewriting a message that had already been sent", "Overtime for the morning office only", "A printed invoice for the storm"], answer: 1, why: "People called, and the night supervisor had to rewrite instructions the first memo skipped.", whyZh: "大家只好打電話，夜班主管還得把已經寄出的訊息重寫一次。" }
     ]
   }
 ];

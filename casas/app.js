@@ -93,7 +93,8 @@ function placeLevel(correct) {
   if (correct <= 1) return "A";
   if (correct <= 3) return "B";
   if (correct <= 5) return "C";
-  return "D";
+  if (correct <= 6) return "D";
+  return "E";
 }
 
 function clock() {
@@ -178,14 +179,14 @@ function renderHome() {
         <label class="field">ID
           <input id="sid" type="text" maxlength="12" value="${esc(state.sid)}" />
         </label>
-        <p class="fine">題庫有 ${articleCount} 篇文章。等級測驗決定 A 到 D，正式考再從那個等級隨機抽文章。Rehearsal 的 3 題不計分。</p>
+        <p class="fine">題庫有 ${articleCount} 篇文章。等級測驗決定 A 到 E，正式考再從那個等級隨機抽文章。Rehearsal 的 3 題不計分。</p>
         <button class="begin" id="start" type="button">Begin locator</button>
       </section>
     </div>`;
 }
 
 function renderLevel() {
-  const names = { A: "A 入門", B: "B 初級", C: "C 中級", D: "D 進階" };
+  const names = { A: "A 入門", B: "B 初級", C: "C 中級", D: "D 進階", E: "E 高階" };
   app.innerHTML = `
     <div class="gate">
       <p class="fine">Locator result</p>
