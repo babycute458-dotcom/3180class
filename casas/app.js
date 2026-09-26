@@ -89,6 +89,7 @@ function inflate(passage, limit) {
       title: passage.title,
       by: passage.by || "",
       paragraphs: passage.paragraphs,
+      level: passage.level,
       form: passage.form || null,
       right: passage.right || null,
       q: question.q,
@@ -101,12 +102,29 @@ function inflate(passage, limit) {
   });
 }
 
-function placeLevel(correct) {
-  if (correct <= 1) return "A";
-  if (correct <= 3) return "B";
-  if (correct <= 5) return "C";
-  if (correct <= 6) return "D";
-  return "E";
+function placeLevel(items, answers) {
+  const order = ["A", "B", "C", "D", "E"];
+  let level = "A";
+  for (const band of order) {
+    const rows = items.map((item, i) => ({ item, i })).filter((row) => row.item.level === band);
+    if (!rows.length) continue;
+    const correct = rows.filter((row) => answers[row.i] === row.item.answer).length;
+    if (correct * 2 >= rows.length) level = band;
+    else break;
+  }
+  return level;
+}
+
+function bandItems(pool, level, count) {
+  const passages = shuffle(pool.filter((item) => item.level === level));
+  const picked = [];
+  for (const passage of passages) {
+    if (picked.length >= count) break;
+    const room = count - picked.length;
+    const questions = shuffle(inflate(passage));
+    picked.push(...questions.slice(0, Math.min(questions.length, room, 2)));
+  }
+  return picked;
 }
 
 function clock() {
@@ -139,8 +157,9 @@ function beginRound(items, screen) {
 }
 
 function startLocator() {
-  const items = (window.LOCATOR || []).flatMap((passage) => inflate(passage));
-  beginRound(items, "locator");
+  const pool = window.LOCATOR || [];
+  const items = ["A", "B", "C", "D", "E"].flatMap((level) => bandItems(pool, level, 3));
+  beginRound(shuffle(items), "locator");
 }
 
 function startExam() {
@@ -179,11 +198,12 @@ function render() {
 
 function renderHome() {
   const articleCount = (window.BANK || []).length;
+  const locatorCount = (window.LOCATOR || []).length;
   app.innerHTML = `
     <div class="home">
       <a class="back" href="../">回單字練習</a>
       <h1>CASAS eTests Online</h1>
-      <p class="lede">先做等級測驗，測完直接進入 25 題正式考試。簡單題配分較低，推論、態度和字義題配分較高。</p>
+      <p class="lede">等級測驗每次換一組題，測完直接進入 25 題正式考試。簡單題配分較低，推論、態度和字義題配分較高。</p>
       <section class="panel">
         <label class="field">Name
           <input id="name" type="text" maxlength="40" value="${esc(state.name)}" placeholder="Your name" />
@@ -191,7 +211,7 @@ function renderHome() {
         <label class="field">ID
           <input id="sid" type="text" maxlength="12" value="${esc(state.sid)}" />
         </label>
-        <p class="fine">題庫有 ${articleCount} 篇。等級測驗決定 A 到 E，正式考從那個等級隨機抽 25 題。NRS 等級最高顯示到 6+，分數本身可以高過 236。</p>
+        <p class="fine">等級測驗有 ${locatorCount} 篇，每次從 A 到 E 各抽題，所以不會是同一份。正式考再從該等級 ${articleCount} 篇裡抽 25 題。NRS 等級最高顯示到 6+，分數本身可以高過 236。</p>
         <button class="begin" id="start" type="button">Begin locator</button>
       </section>
     </div>`;
@@ -281,7 +301,7 @@ function finishTest() {
   if (state.screen === "locator") {
     state.locatorCorrect = correct;
     state.locatorTotal = state.items.length;
-    state.level = placeLevel(correct);
+    state.level = placeLevel(state.items, state.answers);
     savePrefs();
     startExam();
     return;
