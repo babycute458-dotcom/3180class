@@ -244,42 +244,54 @@ function renderTest() {
   const show = false;
   const pct = Math.round(((state.index + 1) / state.items.length) * 100);
   const last = state.index === state.items.length - 1;
-  const phase = state.screen === "exam" ? "Time Remaining" : state.screen === "rehearsal" ? "Rehearsal" : "Locator";
-  const phaseValue = state.screen === "exam" ? clock() : `${state.index + 1} / ${state.items.length}`;
+  const n = state.index + 1;
+  const total = state.items.length;
+  const phase = state.screen === "exam" ? "Time Remaining:" : state.screen === "rehearsal" ? "Rehearsal:" : "Locator:";
+  const phaseValue = state.screen === "exam" ? clock() : `${n} / ${total}`;
+  const forward = last
+    ? `<button id="finish" class="finish" type="button">${state.screen === "exam" ? "Finish" : "Continue"}</button>`
+    : `<button id="next" type="button" aria-label="Next">›</button>`;
   app.innerHTML = `
     <div class="exam">
+      <div class="kiosk"><span class="kiosk-mark">i</span><span>Practice only. This is not the official CASAS test.</span></div>
       <header class="head">
-        <div class="head-cell"><span>ID</span><strong>${esc(state.sid)}</strong></div>
-        <div class="head-cell"><span>Name</span><strong>${esc(state.name || "Student")}</strong></div>
-        <div class="head-cell"><span>${phase}</span><strong id="clock">${phaseValue}</strong></div>
-        <button class="pause" id="pause" type="button" aria-label="Pause">${state.paused ? "▶" : "❚❚"}</button>
+        <button class="icon-btn" id="to-top" type="button" aria-label="Top">↑</button>
+        <div class="idline"><span>ID:</span> <b>${esc(state.sid)}</b></div>
+        <div class="idline"><span>Name:</span> <b>${esc(state.name || "Student")}</b></div>
+        <div class="timebox">
+          <span>${phase}</span>
+          <strong id="clock">${phaseValue}</strong>
+          <button class="pause" id="pause" type="button" aria-label="Pause">${state.paused ? "▶" : "❚❚"}</button>
+        </div>
+        <div class="progress">
+          <span class="now">${n}</span>
+          <div class="track"><span style="width:${pct}%"></span></div>
+          <span class="total">${total}</span>
+        </div>
+        <div class="stepper">
+          <button id="prev" type="button" aria-label="Previous" ${state.index === 0 ? "disabled" : ""}>‹</button>
+          <span>${n} of ${total}</span>
+          ${forward}
+        </div>
       </header>
       <div class="stage">
-        <section class="reader">
-          ${passageHtml(item)}
+        <section class="reader" id="reader">
+          <div class="sheet">${passageHtml(item)}</div>
           <div class="zoom">
             <button type="button" id="zoom-out" aria-label="Zoom out">−</button>
             <button type="button" id="zoom-in" aria-label="Zoom in">+</button>
           </div>
         </section>
         <section class="qpane">
-          <div class="q-top">
-            <div class="track"><span style="width:${pct}%"></span></div>
-            <div class="q-count"><b>${state.index + 1}</b><span>${state.items.length}</span></div>
-          </div>
           <p class="stem">${rich(item.q)}</p>
           <div class="choices-col">
             ${item.choices.map((text, i) => {
               let cls = picked === i ? "on" : "";
               if (show && i === item.answer) cls = "good";
               else if (show && picked === i && i !== item.answer) cls = "bad";
-              return `<button type="button" class="choice ${cls}" data-choice="${i}">${esc(text)}</button>`;
+              return `<button type="button" class="choice ${cls}" data-choice="${i}"><span class="box" aria-hidden="true"></span><span class="choice-text">${esc(text)}</span></button>`;
             }).join("")}
             ${show ? `<p class="why">${esc(item.why)} ${esc(item.whyZh || "")}</p>` : ""}
-          </div>
-          <div class="q-nav">
-            <button id="prev" type="button" ${state.index === 0 ? "disabled" : ""}>‹</button>
-            ${last ? `<button class="finish" id="finish" type="button">${state.screen === "exam" ? "Finish" : "Continue"}</button>` : `<button id="next" type="button">›</button>`}
           </div>
         </section>
       </div>
@@ -435,6 +447,9 @@ function bind() {
   app.querySelectorAll("[data-count]").forEach((btn) => btn.addEventListener("click", () => { state.count = Number(btn.dataset.count); savePrefs(); render(); }));
   app.querySelectorAll("[data-mode]").forEach((btn) => btn.addEventListener("click", () => { state.mode = btn.dataset.mode; savePrefs(); render(); }));
   document.getElementById("start")?.addEventListener("click", startLocator);
+  document.getElementById("to-top")?.addEventListener("click", () => {
+    document.getElementById("reader")?.scrollTo({ top: 0, behavior: "smooth" });
+  });
   document.getElementById("pause")?.addEventListener("click", () => {
     if (state.paused) {
       state.deadline = Date.now() + state.remainMs;
