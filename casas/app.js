@@ -145,12 +145,14 @@ function beginRound(items, screen) {
   state.screen = screen;
   state.showAll = false;
   state.resultPage = 0;
-  if (screen === "exam") {
-    state.scoreSent = false;
-    state.scoreNote = "";
-    state.remainMs = 60 * 60 * 1000;
+  if (screen === "exam" || screen === "locator") {
+    if (screen === "exam") {
+      state.scoreSent = false;
+      state.scoreNote = "";
+      state.finishedOn = null;
+    }
+    state.remainMs = (screen === "exam" ? 60 : 15) * 60 * 1000;
     state.deadline = Date.now() + state.remainMs;
-    state.finishedOn = null;
   }
   savePrefs();
   render();
@@ -158,7 +160,7 @@ function beginRound(items, screen) {
 
 function startLocator() {
   const pool = window.LOCATOR || [];
-  const items = ["A", "B", "C", "D", "E"].flatMap((level) => bandItems(pool, level, 3));
+  const items = ["A", "B", "C", "D", "E"].flatMap((level) => bandItems(pool, level, 1));
   beginRound(shuffle(items), "locator");
 }
 
@@ -203,7 +205,7 @@ function renderHome() {
     <div class="home">
       <a class="back" href="../">回單字練習</a>
       <h1>CASAS eTests Online</h1>
-      <p class="lede">等級測驗每次換一組題，測完直接進入 25 題正式考試。簡單題配分較低，推論、態度和字義題配分較高。</p>
+      <p class="lede">等級測驗 5 題，畫面和正式考一樣。測完直接進入 25 題正式考試。簡單題配分較低，推論、態度和字義題配分較高。</p>
       <section class="panel">
         <label class="field">Name
           <input id="name" type="text" maxlength="40" value="${esc(state.name)}" placeholder="Your name" />
@@ -211,7 +213,7 @@ function renderHome() {
         <label class="field">ID
           <input id="sid" type="text" maxlength="12" value="${esc(state.sid)}" />
         </label>
-        <p class="fine">等級測驗有 ${locatorCount} 篇，每次從 A 到 E 各抽題，所以不會是同一份。正式考再從該等級 ${articleCount} 篇裡抽 25 題。NRS 等級最高顯示到 6+，分數本身可以高過 236。</p>
+        <p class="fine">等級測驗有 ${locatorCount} 篇，每次從 A 到 E 各抽 1 題，一共 5 題，不會是同一份。正式考再從該等級 ${articleCount} 篇裡抽 25 題。NRS 等級最高顯示到 6+，分數本身可以高過 236。</p>
         <button class="begin" id="start" type="button">Begin locator</button>
       </section>
     </div>`;
@@ -246,8 +248,8 @@ function renderTest() {
   const last = state.index === state.items.length - 1;
   const n = state.index + 1;
   const total = state.items.length;
-  const phase = state.screen === "exam" ? "Time Remaining:" : state.screen === "rehearsal" ? "Rehearsal:" : "Locator:";
-  const phaseValue = state.screen === "exam" ? clock() : `${n} / ${total}`;
+  const phase = "Time Remaining:";
+  const phaseValue = clock();
   const forward = last
     ? `<button id="finish" class="finish" type="button">${state.screen === "exam" ? "Finish" : "Continue"}</button>`
     : `<button id="next" type="button" aria-label="Next">›</button>`;
@@ -296,7 +298,7 @@ function renderTest() {
         </section>
       </div>
     </div>`;
-  if (state.screen !== "exam") return;
+  if (state.screen !== "exam" && state.screen !== "locator") return;
   timerId = setInterval(() => {
     const el = document.getElementById("clock");
     if (!el) return;
