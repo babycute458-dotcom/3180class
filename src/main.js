@@ -25,7 +25,7 @@ const state = {
 }
 
 const app = document.querySelector('#app')
-const APP_VERSION = 'v12'
+const APP_VERSION = 'v13'
 const TTS_RELEASE_MS = 900
 
 function normalize(text) {
@@ -192,11 +192,12 @@ async function startListening() {
 
   try {
     await ensureStt()
-  } catch {
+  } catch (err) {
     state.micStarting = false
+    const detail = err?.message ? `（${err.message}）` : ''
     state.feedback = {
       type: 'warn',
-      message: '语音模型加载失败（需要网络下载一次）。请检查网络，或先用下方打字提交。',
+      message: `语音模型加载失败${detail}。请检查网络后重试，或先用下方打字提交。`,
     }
     render('patch')
     return

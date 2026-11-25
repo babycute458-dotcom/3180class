@@ -1,6 +1,9 @@
 const MODEL_ID = 'Xenova/whisper-tiny.en'
 const TARGET_SAMPLE_RATE = 16000
-const TRANSFORMERS_CDN = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2'
+// v2 CDN build is a self-contained ESM (bundles onnxruntime). v4's transformers.web.js
+// has bare imports like "onnxruntime-web/webgpu" and fails in the browser.
+const TRANSFORMERS_CDN =
+  'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js'
 
 let transformersMod = null
 let transcriberPromise = null
@@ -17,12 +20,10 @@ function setLoadStatus(phase, progress, message) {
 async function loadTransformers() {
   if (transformersMod) return transformersMod
   setLoadStatus('download', 0, '正在加载语音引擎…')
-  // Load from CDN so the GitHub Pages deploy stays small and avoids bundling ONNX.
-  transformersMod = await import(/* @vite-ignore */ `${TRANSFORMERS_CDN}/dist/transformers.web.js`)
+  transformersMod = await import(/* @vite-ignore */ TRANSFORMERS_CDN)
   const { env } = transformersMod
   env.allowLocalModels = false
   env.useBrowserCache = true
-  // Leave wasmPaths unset — transformers will pull onnxruntime-web WASM from jsDelivr.
   return transformersMod
 }
 
@@ -30,8 +31,6 @@ async function createTranscriber(remoteHost) {
   const { pipeline, env } = await loadTransformers()
   if (remoteHost) env.remoteHost = remoteHost
   return pipeline('automatic-speech-recognition', MODEL_ID, {
-    device: 'wasm',
-    dtype: 'q8',
     progress_callback: (data) => {
       if (!data) return
       const progress = typeof data.progress === 'number' ? Math.round(data.progress) : loadStatus.progress
@@ -63,7 +62,12 @@ export function loadSttEngine(onStatus) {
           return t
         } catch (err) {
           lastError = err
-          setLoadStatus('download', 0, '下载失败，正在换源重试…')
+          console.warn('[stt] model load failed', host || 'default', err)
+          setLoadStatus(
+            'download',
+            0,
+            `下载失败（${err?.message || err}），正在换源重试…`,
+          )
           onStatus?.(getSttLoadStatus())
         }
       }
