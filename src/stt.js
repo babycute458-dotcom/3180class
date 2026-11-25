@@ -1,12 +1,8 @@
-import { pipeline, env } from '@huggingface/transformers'
-
-// Load models from the Hub (cached by the browser after first download).
-env.allowLocalModels = false
-env.useBrowserCache = true
-
 const MODEL_ID = 'Xenova/whisper-tiny.en'
 const TARGET_SAMPLE_RATE = 16000
+const TRANSFORMERS_CDN = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2'
 
+let transformersMod = null
 let transcriberPromise = null
 let loadStatus = { phase: 'idle', progress: 0, message: '' }
 
@@ -18,7 +14,21 @@ function setLoadStatus(phase, progress, message) {
   loadStatus = { phase, progress, message }
 }
 
+async function loadTransformers() {
+  if (transformersMod) return transformersMod
+  setLoadStatus('download', 0, '正在加载语音引擎…')
+  // Load from CDN so the GitHub Pages deploy stays small and avoids bundling ONNX.
+  transformersMod = await import(/* @vite-ignore */ `${TRANSFORMERS_CDN}/dist/transformers.web.js`)
+  const { env } = transformersMod
+  env.allowLocalModels = false
+  env.useBrowserCache = true
+  // WASM files also come from the CDN package.
+  env.backends.onnx.wasm.wasmPaths = `${TRANSFORMERS_CDN}/dist/`
+  return transformersMod
+}
+
 async function createTranscriber(remoteHost) {
+  const { pipeline, env } = await loadTransformers()
   if (remoteHost) env.remoteHost = remoteHost
   return pipeline('automatic-speech-recognition', MODEL_ID, {
     device: 'wasm',
@@ -54,7 +64,7 @@ export function loadSttEngine(onStatus) {
           return t
         } catch (err) {
           lastError = err
-          setLoadStatus('download', 0, `下载失败，正在换源重试…`)
+          setLoadStatus('download', 0, '下载失败，正在换源重试…')
           onStatus?.(getSttLoadStatus())
         }
       }
@@ -109,7 +119,6 @@ async function blobToMono16k(blob) {
   try {
     const decoded = await ctx.decodeAudioData(arrayBuf.slice(0))
     const ch0 = decoded.getChannelData(0)
-    // Mixdown if stereo
     let mono = ch0
     if (decoded.numberOfChannels > 1) {
       const ch1 = decoded.getChannelData(1)
