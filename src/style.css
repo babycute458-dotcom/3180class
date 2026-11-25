@@ -448,6 +448,38 @@ button {
   }
 }
 
+.install-card {
+  margin: 0 0 1.25rem;
+  padding: 1rem 1.1rem;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(20, 52, 71, 0.95), rgba(31, 111, 139, 0.92));
+  color: #f4efe6;
+  box-shadow: var(--shadow-soft);
+}
+
+.install-card strong {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  margin-bottom: 0.35rem;
+}
+
+.install-card p {
+  margin: 0 0 0.6rem;
+  line-height: 1.45;
+  opacity: 0.95;
+}
+
+.install-card ol {
+  margin: 0;
+  padding-left: 1.2rem;
+  line-height: 1.55;
+}
+
+.install-card b {
+  color: #fff;
+}
+
 @media (max-width: 640px) {
   .shell {
     width: min(100% - 1.25rem, 920px);

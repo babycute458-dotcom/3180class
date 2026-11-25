@@ -37,7 +37,7 @@ const state = {
 }
 
 const app = document.querySelector('#app')
-const APP_VERSION = 'v16'
+const APP_VERSION = 'v17'
 const TTS_RELEASE_MS = 0
 
 function normalize(text) {
@@ -492,15 +492,36 @@ function escapeHtml(str) {
     .replaceAll('"', '&quot;')
 }
 
+function isStandaloneApp() {
+  return (
+    window.matchMedia('(display-mode: standalone)').matches ||
+    window.navigator.standalone === true
+  )
+}
+
 function renderHome() {
   const total = SENTENCES.length
   const selectedCount = SENTENCES.filter((s) => state.selected.has(s.set)).length
+  const showInstall = isAppleMobile() && !isStandaloneApp()
 
   return `
     <div class="shell">
       <section class="hero">
         <h1 class="brand"><span>Speak Chinese → Answer English</span>对练</h1>
         <p class="lede">机器读中文，你讲英文。说错会纠正，说对就随机出下一题。已收录你笔记本里的 ${total} 句。</p>
+        ${
+          showInstall
+            ? `<div class="install-card">
+                <strong>做成手机 App（不上架）</strong>
+                <p>请用 <b>Safari</b> 打开本页 → 点底部分享按钮 → <b>加入主画面</b>。之后从桌面图标打开，麦克风会稳很多。</p>
+                <ol>
+                  <li>用 Safari 打开这个网址</li>
+                  <li>点分享（方框+箭头）</li>
+                  <li>选择「加入主画面」</li>
+                </ol>
+              </div>`
+            : ''
+        }
         <div class="set-grid">
           ${SETS.map(
             (set) => `
@@ -515,9 +536,9 @@ function renderHome() {
           <button class="btn btn-primary" data-action="start" type="button">开始练习（${selectedCount} 句）</button>
         </div>
         ${
-          !canRecordAudio()
-            ? `<div class="unsupported">当前浏览器可能无法录音。建议使用最新版 Chrome；也可以在练习页用键盘输入。</div>`
-            : `<p class="hint">提示：先点「听中文」，再点「说英文」开口，说完点「我说完了」。手机请允许麦克风。</p>`
+          !canRecordAudio() && !canUseWebSpeech()
+            ? `<div class="unsupported">当前浏览器可能无法录音。建议使用 Safari / Chrome；也可以在练习页用键盘输入。</div>`
+            : `<p class="hint">提示：先点「听中文」，再点「说英文」。手机请用 Safari 并允许麦克风；也可加入主画面当 App 用。</p>`
         }
       </section>
     </div>
@@ -703,6 +724,12 @@ if (window.speechSynthesis) {
     state.voicesReady = true
   }
   window.speechSynthesis.getVoices()
+}
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => {})
+  })
 }
 
 render()
