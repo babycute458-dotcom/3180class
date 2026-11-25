@@ -22,8 +22,7 @@ async function loadTransformers() {
   const { env } = transformersMod
   env.allowLocalModels = false
   env.useBrowserCache = true
-  // WASM files also come from the CDN package.
-  env.backends.onnx.wasm.wasmPaths = `${TRANSFORMERS_CDN}/dist/`
+  // Leave wasmPaths unset — transformers will pull onnxruntime-web WASM from jsDelivr.
   return transformersMod
 }
 
