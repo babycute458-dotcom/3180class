@@ -8,6 +8,10 @@
 
 **https://3180class.netlify.app/**
 
+中譯英口語對練（聽中文、說英文）：
+
+**https://3180class.netlify.app/duilian/**
+
 手機瀏覽器也可以用「加入主畫面」，之後像 App 一樣點開。
 
 ## 和姐姐、同學一起造句
