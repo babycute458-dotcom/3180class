@@ -26,6 +26,10 @@ const state = {
   micStarting: false,
   pendingHeard: null,
   intentionalAbort: false,
+  micStream: null,
+  micPermissionReady: false,
+  micChain: Promise.resolve(),
+  lastMicEndAt: 0,
 }
 
 const app = document.querySelector('#app')
@@ -54,12 +58,11 @@ function pickRandom(excludeId) {
   return next
 }
 
-const APP_VERSION = 'v10'
-const MIC_COOLDOWN_MS = 900
-const MIC_ERROR_COOLDOWN_MS = 1300
-const MIC_WAIT_CAP_MS = 2000
-const MIC_LISTEN_TIMEOUT_MS = 15000
-const MIC_DISPOSE_TIMEOUT_MS = 900
+const APP_VERSION = 'v11'
+const MIC_COOLDOWN_MS = 700
+const MIC_RETRY_GAP_MS = 1100
+const MIC_LISTEN_TIMEOUT_MS = 16000
+const MIC_DISPOSE_TIMEOUT_MS = 1000
 
 function pickChineseVoice() {
   const voices = window.speechSynthesis?.getVoices?.() || []
@@ -78,6 +81,12 @@ function clearTypedInput() {
 
 function sleep(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
+function enqueueMic(task) {
+  const run = state.micChain.catch(() => {}).then(task)
+  state.micChain = run.catch(() => {})
+  return run
 }
 
 function clearMicWatchdog() {
@@ -99,11 +108,16 @@ function armMicWatchdog(session) {
     state.pendingHeard = null
     state.listenSession += 1
     try {
-      rec?.abort?.()
+      // stop() is gentler than abort() for the next start
+      if (rec) {
+        if (typeof rec.stop === 'function') rec.stop()
+        else rec.abort?.()
+      }
     } catch {
       // ignore
     }
-    void releaseMicGate(MIC_ERROR_COOLDOWN_MS)
+    state.lastMicEndAt = Date.now()
+    state.micBusy = false
     state.feedback = { type: 'warn', message: '麦克风超时了，请再点一次「说英文」。' }
     render('patch')
   }, MIC_LISTEN_TIMEOUT_MS)
@@ -132,6 +146,7 @@ function disposeRecognition(rec, { force = false } = {}) {
     const finish = () => {
       if (settled) return
       settled = true
+      state.lastMicEndAt = Date.now()
       stripRecognitionHandlers(rec)
       resolve()
     }
@@ -143,10 +158,19 @@ function disposeRecognition(rec, { force = false } = {}) {
         window.clearTimeout(timer)
         finish()
       }
+      state.intentionalAbort = true
       if (force) {
-        state.intentionalAbort = true
-        if (typeof rec.abort === 'function') rec.abort()
-        else rec.stop()
+        // Prefer stop first; abort only if stop throws.
+        try {
+          rec.stop()
+        } catch {
+          try {
+            rec.abort?.()
+          } catch {
+            window.clearTimeout(timer)
+            finish()
+          }
+        }
       } else {
         try {
           rec.stop()
@@ -162,23 +186,41 @@ function disposeRecognition(rec, { force = false } = {}) {
   })
 }
 
-function releaseMicGate(ms = MIC_COOLDOWN_MS) {
-  state.micBusy = true
-  const wait = sleep(ms).then(() => {
-    state.micBusy = false
+async function warmMicPermission() {
+  // Request once, then release — do NOT hold the stream while SpeechRecognition runs
+  // (holding it can mute recognition on some Chrome/Android builds).
+  if (state.micPermissionReady) return
+  if (!navigator.mediaDevices?.getUserMedia) {
+    state.micPermissionReady = true
+    return
+  }
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: true,
+    video: false,
   })
-  state.micFreePromise = wait
-  return wait
+  try {
+    stream.getTracks().forEach((t) => t.stop())
+  } catch {
+    // ignore
+  }
+  state.micPermissionReady = true
 }
 
-/** Wait for prior mic teardown, but never hang forever. */
-function waitMicReady() {
-  return Promise.race([
-    Promise.resolve(state.micFreePromise).catch(() => {}),
-    sleep(MIC_WAIT_CAP_MS),
-  ]).then(() => {
-    state.micBusy = false
-  })
+function releaseMicStream() {
+  if (!state.micStream) return
+  try {
+    state.micStream.getTracks().forEach((t) => t.stop())
+  } catch {
+    // ignore
+  }
+  state.micStream = null
+}
+
+async function waitUntilMicSettled(minGap = MIC_COOLDOWN_MS) {
+  const elapsed = Date.now() - (state.lastMicEndAt || 0)
+  const need = Math.max(0, minGap - elapsed)
+  if (need > 0) await sleep(need)
+  state.micBusy = false
 }
 
 function softCloseMic() {
@@ -190,13 +232,14 @@ function softCloseMic() {
   const rec = state.recognition
   state.recognition = null
   if (!rec) {
-    return releaseMicGate(MIC_COOLDOWN_MS)
+    state.lastMicEndAt = Date.now()
+    state.micBusy = false
+    return Promise.resolve()
   }
-  // Prefer stop() — abort() often poisons the next start() on Chrome.
-  return disposeRecognition(rec, { force: false }).then(() => releaseMicGate(MIC_COOLDOWN_MS))
+  return disposeRecognition(rec, { force: false })
 }
 
-function hardStopMic() {
+function hardStopMic({ releaseStream = false } = {}) {
   clearMicWatchdog()
   state.listenSession += 1
   state.listening = false
@@ -204,12 +247,13 @@ function hardStopMic() {
   state.pendingHeard = null
   const rec = state.recognition
   state.recognition = null
-  if (!rec) {
+  const done = rec ? disposeRecognition(rec, { force: true }) : Promise.resolve().then(() => {
+    state.lastMicEndAt = Date.now()
     state.micBusy = false
-    state.micFreePromise = Promise.resolve()
-    return Promise.resolve()
-  }
-  return disposeRecognition(rec, { force: true }).then(() => releaseMicGate(MIC_ERROR_COOLDOWN_MS))
+  })
+  return done.then(() => {
+    if (releaseStream) releaseMicStream()
+  })
 }
 
 function stopSpeaking() {
@@ -225,8 +269,8 @@ function stopSpeaking() {
 }
 
 function speakChinese(text) {
-  // Detach mic before TTS; keep user-gesture TTS synchronous.
-  void hardStopMic()
+  // Stop recognition only; keep the held mic stream so the next listen works.
+  void hardStopMic({ releaseStream: false })
 
   if (!window.speechSynthesis) {
     state.feedback = { type: 'warn', message: '这个浏览器不支持中文朗读，请看屏幕上的中文。' }
@@ -256,8 +300,7 @@ function speakChinese(text) {
   const finish = (ok) => {
     if (speakSession !== state.speakSession) return
     state.speaking = false
-    // Give the audio stack a beat before the next mic start.
-    void releaseMicGate(MIC_COOLDOWN_MS)
+    state.lastMicEndAt = Date.now()
     state.feedback = {
       type: ok ? 'info' : 'warn',
       message: ok ? '读完了。请自己点「说英文」。' : '中文朗读失败，请看屏幕文字，再点「说英文」。',
@@ -294,9 +337,9 @@ function beginRecognition(session, attempt = 0) {
   }
 
   recognition.lang = 'en-US'
-  recognition.interimResults = false
+  recognition.interimResults = true
   recognition.continuous = false
-  recognition.maxAlternatives = 1
+  recognition.maxAlternatives = 3
 
   state.recognition = recognition
   state.listening = true
@@ -304,91 +347,101 @@ function beginRecognition(session, attempt = 0) {
   state.micStarting = false
   state.pendingHeard = null
   state.intentionalAbort = false
-  state.feedback = { type: 'info', message: '请说英文…' }
+  state.feedback = { type: 'info', message: '请说英文…（说完稍等一下）' }
   render('patch')
   armMicWatchdog(session)
 
-  let gotResult = false
+  let gotFinal = false
   let errorCode = null
+  let bestInterim = ''
 
-  recognition.onresult = (event) => {
-    if (session !== state.listenSession) return
-    const transcript = event.results?.[0]?.[0]?.transcript?.trim() || ''
-    if (!transcript || gotResult) return
-    gotResult = true
+  const finishWithTranscript = (transcript) => {
+    if (gotFinal || session !== state.listenSession) return
+    gotFinal = true
     clearMicWatchdog()
     state.pendingHeard = transcript
     state.heard = transcript
     state.listening = false
     render('patch')
-    // Do NOT stop()/abort() here. Wait for natural onend, then score.
+    // continuous:false ends on its own after a final result.
+    // Calling stop()/abort() here is what broke the next retry on Chrome.
+  }
+
+  recognition.onresult = (event) => {
+    if (session !== state.listenSession || gotFinal) return
+    let interim = ''
+    let finalText = ''
+    for (let i = event.resultIndex; i < event.results.length; i += 1) {
+      const result = event.results[i]
+      let piece = ''
+      // Prefer the alternative closest to expected when scoring later; keep top transcript for display.
+      piece = result?.[0]?.transcript?.trim() || ''
+      if (!piece) continue
+      if (result.isFinal) finalText += (finalText ? ' ' : '') + piece
+      else interim += (interim ? ' ' : '') + piece
+    }
+    if (interim) {
+      bestInterim = interim
+      state.heard = interim
+      render('patch')
+    }
+    if (finalText) finishWithTranscript(finalText)
   }
 
   recognition.onerror = (event) => {
     if (session !== state.listenSession) return
     errorCode = event.error || 'error'
-
-    // Our own hard stop / dispose — onend will finish cleanup.
     if (errorCode === 'aborted' && state.intentionalAbort) return
-
-    clearMicWatchdog()
-    state.listening = false
+    // Keep listening UI until onend; do not zero micBusy early.
+    if (errorCode !== 'no-speech') {
+      state.listening = false
+    }
   }
 
   recognition.onend = () => {
     stripRecognitionHandlers(recognition)
     if (state.recognition === recognition) state.recognition = null
+    state.lastMicEndAt = Date.now()
     if (session !== state.listenSession) return
 
     clearMicWatchdog()
     state.listening = false
     state.micStarting = false
+    state.micBusy = false
 
-    const heard = state.pendingHeard
+    const heard = state.pendingHeard || (!gotFinal && bestInterim ? bestInterim : null)
     state.pendingHeard = null
 
     if (heard) {
-      // Engine is fully idle now — score without touching recognition again.
-      void releaseMicGate(MIC_COOLDOWN_MS)
       evaluateAnswer(heard, { fromSpeech: true })
       return
     }
 
-    // Unexpected abort: auto-retry once after a longer cool-down.
-    if (errorCode === 'aborted' && !state.intentionalAbort && attempt < 2) {
-      void releaseMicGate(MIC_ERROR_COOLDOWN_MS).then(() => {
-        if (session !== state.listenSession) return
-        beginRecognition(session, attempt + 1)
-      })
-      return
-    }
-
+    // Soft auto-retry for flaky engine errors (not permission / no-speech).
     const retryable =
-      errorCode &&
-      errorCode !== 'no-speech' &&
-      errorCode !== 'not-allowed' &&
-      errorCode !== 'aborted' &&
-      attempt < 2
+      !state.intentionalAbort &&
+      attempt < 2 &&
+      (errorCode === 'aborted' ||
+        errorCode === 'network' ||
+        errorCode === 'audio-capture')
 
     if (retryable) {
-      void releaseMicGate(MIC_ERROR_COOLDOWN_MS).then(() => {
+      state.feedback = { type: 'info', message: '麦克风重试中…' }
+      render('patch')
+      void waitUntilMicSettled(MIC_RETRY_GAP_MS).then(() => {
         if (session !== state.listenSession) return
         beginRecognition(session, attempt + 1)
       })
       return
     }
 
-    void releaseMicGate(MIC_ERROR_COOLDOWN_MS)
-
-    if (errorCode === 'no-speech' || (!errorCode && !gotResult)) {
-      state.feedback = { type: 'warn', message: '没听到声音，请再点「说英文」。' }
-    } else if (errorCode === 'not-allowed') {
+    if (errorCode === 'not-allowed') {
       state.feedback = { type: 'warn', message: '请允许麦克风权限后再试。' }
     } else if (errorCode === 'network') {
-      state.feedback = { type: 'warn', message: '语音识别需要网络，请检查连线。' }
+      state.feedback = { type: 'warn', message: '语音识别需要网络，请检查连线后再点「说英文」。' }
     } else if (errorCode === 'aborted') {
       state.feedback = { type: 'warn', message: '麦克风被中断了，请再点「说英文」。' }
-    } else if (errorCode) {
+    } else if (errorCode && errorCode !== 'no-speech') {
       state.feedback = { type: 'warn', message: `识别失败（${errorCode}），请再点「说英文」。` }
     } else {
       state.feedback = { type: 'warn', message: '没听到声音，请再点「说英文」。' }
@@ -398,13 +451,16 @@ function beginRecognition(session, attempt = 0) {
 
   try {
     recognition.start()
-  } catch {
+  } catch (err) {
     clearMicWatchdog()
     state.listening = false
     state.recognition = null
     stripRecognitionHandlers(recognition)
+    state.lastMicEndAt = Date.now()
     if (attempt < 2) {
-      void releaseMicGate(MIC_ERROR_COOLDOWN_MS + attempt * 200).then(() => {
+      state.feedback = { type: 'info', message: '麦克风重试中…' }
+      render('patch')
+      void waitUntilMicSettled(MIC_RETRY_GAP_MS + attempt * 250).then(() => {
         if (session !== state.listenSession) return
         beginRecognition(session, attempt + 1)
       })
@@ -412,7 +468,10 @@ function beginRecognition(session, attempt = 0) {
     }
     state.micBusy = false
     state.micStarting = false
-    state.feedback = { type: 'warn', message: '麦克风还没准备好，请再点一次「说英文」。' }
+    state.feedback = {
+      type: 'warn',
+      message: `麦克风还没准备好（${err?.name || 'error'}），请再点一次「说英文」。`,
+    }
     render('patch')
   }
 }
@@ -427,11 +486,10 @@ function startListening() {
     return
   }
 
-  if (state.micStarting) return
+  if (state.micStarting || state.listening) return
 
   stopSpeaking()
   state.micStarting = true
-  state.intentionalAbort = true
 
   clearMicWatchdog()
   const prev = state.recognition
@@ -445,31 +503,46 @@ function startListening() {
   state.feedback = { type: 'info', message: '正在打开麦克风…' }
   render('patch')
 
-  const hadPrev = !!prev
-  void disposeRecognition(prev, { force: true })
-    .then(() => waitMicReady())
-    // Always pause before start — Chrome needs this after no-speech / wrong-answer retries.
-    .then(() => releaseMicGate(hadPrev ? MIC_ERROR_COOLDOWN_MS : MIC_COOLDOWN_MS))
-    .then(() => {
+  void enqueueMic(async () => {
+    try {
+      if (prev) await disposeRecognition(prev, { force: true })
+      // Hold hardware mic open across retries — major Chrome stability fix.
+      try {
+        await warmMicPermission()
+      } catch (err) {
+        if (session !== state.listenSession) return
+        state.micStarting = false
+        state.micBusy = false
+        state.feedback = {
+          type: 'warn',
+          message:
+            err?.name === 'NotAllowedError'
+              ? '请允许麦克风权限后再试。'
+              : '无法打开麦克风，请检查权限后重试。',
+        }
+        render('patch')
+        return
+      }
+
+      await waitUntilMicSettled(prev ? MIC_RETRY_GAP_MS : MIC_COOLDOWN_MS)
       if (session !== state.listenSession) {
         state.micStarting = false
         return
       }
-      state.intentionalAbort = false
       beginRecognition(session, 0)
-    })
-    .catch(() => {
+    } catch {
+      if (session !== state.listenSession) return
       state.micStarting = false
       state.micBusy = false
       state.listening = false
-      state.intentionalAbort = false
       state.feedback = { type: 'warn', message: '麦克风启动失败，请再点一次。' }
       render('patch')
-    })
+    }
+  })
 }
 
 function evaluateAnswer(heard, { fromSpeech = false } = {}) {
-  // Speech path already waited for natural onend — do not stop()/abort() again.
+  // Speech path already stopped recognition via natural/manual stop.
   if (!fromSpeech) void softCloseMic()
   state.attemptCount += 1
   state.heard = heard
@@ -547,6 +620,8 @@ function unlockSpeech() {
 
 function startPractice() {
   unlockSpeech()
+  // Prime mic permission inside the same tap as Start.
+  void warmMicPermission().catch(() => {})
   rebuildPool()
   if (!state.pool.length) return
   state.view = 'practice'
@@ -746,7 +821,7 @@ app.addEventListener('click', (event) => {
   if (action === 'start') startPractice()
   if (action === 'home') {
     stopSpeaking()
-    void hardStopMic()
+    void hardStopMic({ releaseStream: true })
     state.view = 'home'
     render('full')
   }
@@ -754,12 +829,14 @@ app.addEventListener('click', (event) => {
     speakChinese(state.current.zh)
   }
   if (action === 'mic') {
-    if (state.listening || state.micStarting) {
-      state.micStarting = false
-      void hardStopMic().then(() => {
+    if (state.listening) {
+      void hardStopMic({ releaseStream: false }).then(() => {
         state.feedback = { type: 'info', message: '已停止。要说英文时再点「说英文」。' }
         render('patch')
       })
+    } else if (state.micStarting) {
+      // Ignore double-taps while opening — canceling here caused retry failures.
+      return
     } else {
       startListening()
     }
