@@ -143,18 +143,20 @@ function canonicalize(text) {
     [/\border take out\b/g, 'order takeout'],
     [/\bright now\b/g, 'now'],
     [/\bat the moment\b/g, 'now'],
-    // preference / favorite paraphrases
-    [/\bwhich kind of\b/g, 'which'],
-    [/\bwhat kind of\b/g, 'which'],
-    [/\bwhich type of\b/g, 'which'],
-    [/\bwhat type of\b/g, 'which'],
-    [/\bwhich sort of\b/g, 'which'],
-    [/\bwhat sort of\b/g, 'which'],
+    // true synonym phrases only (not near-miss meaning changes)
+    [/\bi know what you mean\b/g, 'i see what you mean'],
+    [/\bi understand what you mean\b/g, 'i see what you mean'],
+    [/\bi get what you mean\b/g, 'i see what you mean'],
+    [/\bi know what you are saying\b/g, 'i see what you mean'],
+    [/\bi understand what you are saying\b/g, 'i see what you mean'],
+    [/\bi get what you are saying\b/g, 'i see what you mean'],
+    [/\bi know your point\b/g, 'i see your point'],
+    [/\bi understand your point\b/g, 'i see your point'],
+    [/\bi get your point\b/g, 'i see your point'],
+    [/\bi see your point\b/g, 'i see what you mean'],
     [/\blike the most\b/g, 'like most'],
     [/\blike the best\b/g, 'like most'],
     [/\blike best\b/g, 'like most'],
-    [/\blove the most\b/g, 'like most'],
-    [/\bprefer the most\b/g, 'like most'],
   ]
   for (const [re, to] of phrases) t = t.replace(re, to)
 
@@ -200,31 +202,29 @@ function canonicalize(text) {
   return t
 }
 
-/** Collapse common question paraphrases into a meaning skeleton. */
+/** Collapse true paraphrases into a meaning skeleton (keep meaning distinctions). */
 function meaningSkeleton(text) {
   let t = canonicalize(text)
 
-  // what's your favorite X / what is your favourite X
+  // understand / see / know what you mean
+  t = t.replace(/\bi see what you mean\b/g, 'understand you')
+  t = t.replace(/\bi see your point\b/g, 'understand you')
+
+  // what's your favorite X  ==  which X do you like most
+  // but NOT "which kind of X" (that asks for type/genre)
   t = t.replace(/\bwhat is your favorite (\w+)\b/g, 'ask prefer $1')
   t = t.replace(/\bwhat is favorite (\w+)\b/g, 'ask prefer $1')
-  t = t.replace(/\byour favorite (\w+)\b/g, 'prefer $1')
-
-  // which/what (kind of) X do you like most/best
   t = t.replace(/\b(?:which|what) (\w+) do you like most\b/g, 'ask prefer $1')
   t = t.replace(/\b(?:which|what) (\w+) do you prefer\b/g, 'ask prefer $1')
-  t = t.replace(/\b(?:which|what) (\w+) are you into\b/g, 'ask prefer $1')
 
-  // do you have a favorite X
-  t = t.replace(/\bdo you have a favorite (\w+)\b/g, 'ask prefer $1')
+  // keep "kind/type/sort of X" as a different intent
+  t = t.replace(/\b(?:which|what) kind of (\w+)\b/g, 'ask type $1')
+  t = t.replace(/\b(?:which|what) type of (\w+)\b/g, 'ask type $1')
+  t = t.replace(/\b(?:which|what) sort of (\w+)\b/g, 'ask type $1')
 
-  // how have you been / how are you lately
   t = t.replace(/\bhow have you been(?: lately)?\b/g, 'ask wellbeing')
-  t = t.replace(/\bhow are you(?: doing)?(?: today| lately)?\b/g, 'ask wellbeing')
-
-  // what do you do / what is your job
   t = t.replace(/\bwhat do you do for a living\b/g, 'ask job')
   t = t.replace(/\bwhat is your job\b/g, 'ask job')
-  t = t.replace(/\bwhat do you do\b/g, 'ask job')
 
   return t.replace(/\s+/g, ' ').trim()
 }
@@ -271,10 +271,16 @@ function meaningSimilar(heard, expected) {
   if (!a || !b) return false
   if (a === b) return true
 
-  // Same "ask prefer X" topic even if wording still differs slightly
+  // Same preference topic, but never equate "type/kind" with "favorite item"
   const preferA = a.match(/\bask prefer (\w+)\b/)
   const preferB = b.match(/\bask prefer (\w+)\b/)
   if (preferA && preferB && preferA[1] === preferB[1]) return true
+
+  const typeA = a.match(/\bask type (\w+)\b/)
+  const typeB = b.match(/\bask type (\w+)\b/)
+  if (typeA && preferB) return false
+  if (preferA && typeB) return false
+  if (typeA && typeB && typeA[1] === typeB[1]) return true
 
   return similarEnough(a, b)
 }
@@ -305,7 +311,7 @@ function pickRandom(excludeId) {
   return next
 }
 
-const APP_VERSION = 'v6'
+const APP_VERSION = 'v7'
 const MIC_COOLDOWN_MS = 350
 
 function pickChineseVoice() {
