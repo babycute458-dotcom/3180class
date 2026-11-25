@@ -22,6 +22,8 @@ const state = {
   speakSession: 0,
   micBusy: false,
   micFreePromise: Promise.resolve(),
+  micWatchdog: null,
+  micStarting: false,
 }
 
 const app = document.querySelector('#app')
@@ -50,8 +52,10 @@ function pickRandom(excludeId) {
   return next
 }
 
-const APP_VERSION = 'v8'
-const MIC_COOLDOWN_MS = 350
+const APP_VERSION = 'v9'
+const MIC_COOLDOWN_MS = 450
+const MIC_WAIT_CAP_MS = 900
+const MIC_LISTEN_TIMEOUT_MS = 12000
 
 function pickChineseVoice() {
   const voices = window.speechSynthesis?.getVoices?.() || []
@@ -68,85 +72,120 @@ function clearTypedInput() {
   if (input) input.value = ''
 }
 
-function markMicFreeAfter(rec) {
-  if (!rec) {
-    state.micBusy = false
-    return Promise.resolve()
+function clearMicWatchdog() {
+  if (state.micWatchdog) {
+    window.clearTimeout(state.micWatchdog)
+    state.micWatchdog = null
   }
+}
 
-  state.micBusy = true
-  const wait = new Promise((resolve) => {
+function armMicWatchdog(session) {
+  clearMicWatchdog()
+  state.micWatchdog = window.setTimeout(() => {
+    if (session !== state.listenSession) return
+    // Force-unlock if the browser never fires end/error.
+    const rec = state.recognition
+    state.recognition = null
+    state.listening = false
+    state.micBusy = false
+    state.micStarting = false
+    state.listenSession += 1
+    try {
+      rec?.abort?.()
+    } catch {
+      // ignore
+    }
+    state.feedback = { type: 'warn', message: '麦克风超时了，请再点一次「说英文」。' }
+    render('patch')
+  }, MIC_LISTEN_TIMEOUT_MS)
+}
+
+function disposeRecognition(rec, { force = false } = {}) {
+  if (!rec) return Promise.resolve()
+
+  return new Promise((resolve) => {
     let settled = false
     const finish = () => {
       if (settled) return
       settled = true
-      window.setTimeout(() => {
-        state.micBusy = false
-        resolve()
-      }, MIC_COOLDOWN_MS)
+      resolve()
     }
 
-    const timer = window.setTimeout(finish, 800)
-    const previousEnd = rec.onend
-    rec.onend = (event) => {
-      try {
-        previousEnd?.(event)
-      } catch {
-        // ignore
+    const timer = window.setTimeout(finish, 700)
+    try {
+      rec.onresult = null
+      rec.onerror = null
+      rec.onend = () => {
+        window.clearTimeout(timer)
+        finish()
       }
+      if (force) {
+        if (typeof rec.abort === 'function') rec.abort()
+        else rec.stop()
+      } else {
+        try {
+          rec.stop()
+        } catch {
+          window.clearTimeout(timer)
+          finish()
+        }
+      }
+    } catch {
       window.clearTimeout(timer)
       finish()
     }
   })
+}
 
-  state.micFreePromise = wait.catch(() => {
+function releaseMicGate(ms = MIC_COOLDOWN_MS) {
+  state.micBusy = true
+  const wait = new Promise((resolve) => {
+    window.setTimeout(() => {
+      state.micBusy = false
+      resolve()
+    }, ms)
+  })
+  state.micFreePromise = wait
+  return wait
+}
+
+/** Always resolves quickly — never leave the mic permanently locked. */
+function waitMicReady() {
+  return Promise.race([
+    Promise.resolve(state.micFreePromise).catch(() => {}),
+    new Promise((resolve) => window.setTimeout(resolve, MIC_WAIT_CAP_MS)),
+  ]).then(() => {
     state.micBusy = false
   })
-  return state.micFreePromise
 }
 
-/** Soft close after we already got a final transcript — do not abort. */
 function softCloseMic() {
+  clearMicWatchdog()
   state.listenSession += 1
   state.listening = false
+  state.micStarting = false
   const rec = state.recognition
   state.recognition = null
   if (!rec) {
-    state.micBusy = false
-    return Promise.resolve()
+    return releaseMicGate(MIC_COOLDOWN_MS)
   }
-
-  try {
-    rec.onresult = null
-    rec.onerror = null
-  } catch {
-    // ignore
-  }
-
-  return markMicFreeAfter(rec)
+  // After a final result, prefer stop() over abort() — abort often breaks the next start.
+  return disposeRecognition(rec, { force: false }).then(() => releaseMicGate(MIC_COOLDOWN_MS))
 }
 
-/** Hard stop when user cancels or switches mode. */
 function hardStopMic() {
+  clearMicWatchdog()
   state.listenSession += 1
   state.listening = false
+  state.micStarting = false
   const rec = state.recognition
   state.recognition = null
   if (!rec) {
     state.micBusy = false
+    state.micFreePromise = Promise.resolve()
     return Promise.resolve()
   }
-
-  const free = markMicFreeAfter(rec)
-  try {
-    rec.onresult = null
-    rec.onerror = null
-    if (typeof rec.abort === 'function') rec.abort()
-    else rec.stop()
-  } catch {
-    state.micBusy = false
-  }
-  return free
+  return disposeRecognition(rec, { force: true }).then(() => releaseMicGate(MIC_COOLDOWN_MS))
 }
 
 function stopSpeaking() {
@@ -216,7 +255,18 @@ function speakChinese(text) {
 function beginRecognition(session, attempt = 0) {
   if (session !== state.listenSession || state.view !== 'practice') return
 
-  const recognition = new SpeechRecognition()
+  let recognition
+  try {
+    recognition = new SpeechRecognition()
+  } catch {
+    state.listening = false
+    state.micBusy = false
+    state.micStarting = false
+    state.feedback = { type: 'warn', message: '无法创建语音识别，请用输入框或换 Chrome / Edge。' }
+    render('patch')
+    return
+  }
+
   recognition.lang = 'en-US'
   recognition.interimResults = false
   recognition.continuous = false
@@ -225,8 +275,10 @@ function beginRecognition(session, attempt = 0) {
   state.recognition = recognition
   state.listening = true
   state.micBusy = true
+  state.micStarting = false
   state.feedback = { type: 'info', message: '请说英文…' }
   render('patch')
+  armMicWatchdog(session)
 
   let finalized = false
 
@@ -235,7 +287,9 @@ function beginRecognition(session, attempt = 0) {
     const transcript = event.results?.[0]?.[0]?.transcript?.trim() || ''
     if (!transcript || finalized) return
     finalized = true
+    clearMicWatchdog()
     state.heard = transcript
+    state.listening = false
     render('patch')
     evaluateAnswer(transcript)
   }
@@ -244,19 +298,22 @@ function beginRecognition(session, attempt = 0) {
     if (session !== state.listenSession) return
     if (event.error === 'aborted') return
 
-    // One quiet retry for flaky alternate-start failures.
-    if ((event.error === 'not-allowed' ? false : true) && attempt < 1 && event.error !== 'no-speech') {
-      state.listening = false
-      state.recognition = null
-      void markMicFreeAfter(recognition).then(() => {
-        if (session !== state.listenSession) return
-        beginRecognition(session, attempt + 1)
-      })
+    clearMicWatchdog()
+    state.listening = false
+    if (state.recognition === recognition) state.recognition = null
+
+    const retryable = event.error !== 'no-speech' && event.error !== 'not-allowed' && attempt < 2
+    if (retryable) {
+      void disposeRecognition(recognition, { force: true })
+        .then(() => releaseMicGate(MIC_COOLDOWN_MS))
+        .then(() => {
+          if (session !== state.listenSession) return
+          beginRecognition(session, attempt + 1)
+        })
       return
     }
 
-    state.listening = false
-    if (state.recognition === recognition) state.recognition = null
+    state.micBusy = false
     if (event.error === 'no-speech') {
       state.feedback = { type: 'warn', message: '没听到声音，请再点「说英文」。' }
     } else if (event.error === 'not-allowed') {
@@ -264,7 +321,7 @@ function beginRecognition(session, attempt = 0) {
     } else if (event.error === 'network') {
       state.feedback = { type: 'warn', message: '语音识别需要网络，请检查连线。' }
     } else {
-      state.feedback = { type: 'warn', message: `识别失败（${event.error}），请稍等半秒再点「说英文」。` }
+      state.feedback = { type: 'warn', message: `识别失败（${event.error}），请再点「说英文」。` }
     }
     render('patch')
   }
@@ -272,8 +329,10 @@ function beginRecognition(session, attempt = 0) {
   recognition.onend = () => {
     if (state.recognition === recognition) state.recognition = null
     if (session !== state.listenSession) return
+    clearMicWatchdog()
     if (state.listening) {
       state.listening = false
+      state.micBusy = false
       render('patch')
     }
   }
@@ -281,14 +340,19 @@ function beginRecognition(session, attempt = 0) {
   try {
     recognition.start()
   } catch {
+    clearMicWatchdog()
     state.listening = false
     state.recognition = null
-    if (attempt < 1) {
-      window.setTimeout(() => beginRecognition(session, attempt + 1), MIC_COOLDOWN_MS)
+    if (attempt < 2) {
+      window.setTimeout(() => {
+        if (session !== state.listenSession) return
+        beginRecognition(session, attempt + 1)
+      }, MIC_COOLDOWN_MS + attempt * 150)
       return
     }
     state.micBusy = false
-    state.feedback = { type: 'warn', message: '麦克风还没准备好，请稍等再点「说英文」。' }
+    state.micStarting = false
+    state.feedback = { type: 'warn', message: '麦克风还没准备好，请再点一次「说英文」。' }
     render('patch')
   }
 }
@@ -303,21 +367,39 @@ function startListening() {
     return
   }
 
-  stopSpeaking()
+  if (state.micStarting) return
 
-  const session = state.listenSession + 1
-  state.listenSession = session
+  stopSpeaking()
+  state.micStarting = true
+
+  // Invalidate any previous session and tear down leftover recognition.
+  clearMicWatchdog()
+  const prev = state.recognition
+  state.recognition = null
+  state.listening = false
+  state.listenSession += 1
+  const session = state.listenSession
+
   if (!state.awaitingRetry) state.heard = ''
   state.feedback = { type: 'info', message: '正在打开麦克风…' }
   render('patch')
 
-  // Wait until the previous recognition fully released (fixes every-other-turn failure).
-  const ready = state.recognition ? hardStopMic() : state.micFreePromise
-  void Promise.resolve(ready)
-    .catch(() => {})
+  void disposeRecognition(prev, { force: true })
+    .then(() => waitMicReady())
+    .then(() => releaseMicGate(MIC_COOLDOWN_MS))
     .then(() => {
-      if (session !== state.listenSession) return
+      if (session !== state.listenSession) {
+        state.micStarting = false
+        return
+      }
       beginRecognition(session, 0)
+    })
+    .catch(() => {
+      state.micStarting = false
+      state.micBusy = false
+      state.listening = false
+      state.feedback = { type: 'warn', message: '麦克风启动失败，请再点一次。' }
+      render('patch')
     })
 }
 
@@ -470,6 +552,7 @@ function statusPill() {
 }
 
 function micLabel() {
+  if (state.micStarting) return '打开中…'
   if (state.listening) return '听写中…点此停止'
   if (state.awaitingRetry) return '再讲一次'
   return '说英文'
@@ -606,7 +689,8 @@ app.addEventListener('click', (event) => {
     speakChinese(state.current.zh)
   }
   if (action === 'mic') {
-    if (state.listening || state.micBusy) {
+    if (state.listening || state.micStarting) {
+      state.micStarting = false
       void hardStopMic().then(() => {
         state.feedback = { type: 'info', message: '已停止。要说英文时再点「说英文」。' }
         render('patch')
