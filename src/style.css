@@ -224,6 +224,16 @@ button {
   font-size: 1.45rem;
 }
 
+.topbar h1 .ver {
+  font-family: var(--font-body);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin-left: 0.35rem;
+  vertical-align: middle;
+}
+
 .stats {
   display: flex;
   gap: 0.75rem;

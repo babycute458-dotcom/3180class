@@ -245,129 +245,159 @@ function pickRandom(excludeId) {
   return next
 }
 
+const APP_VERSION = 'v4'
+
+function pickChineseVoice() {
+  const voices = window.speechSynthesis?.getVoices?.() || []
+  return (
+    voices.find((v) => v.lang === 'zh-CN') ||
+    voices.find((v) => v.lang === 'zh_CN') ||
+    voices.find((v) => v.lang?.toLowerCase().startsWith('zh')) ||
+    null
+  )
+}
+
+function hardStopMic() {
+  state.listenSession += 1
+  state.listening = false
+  const rec = state.recognition
+  state.recognition = null
+  if (!rec) return
+  try {
+    rec.onresult = null
+    rec.onerror = null
+    rec.onend = null
+    if (typeof rec.abort === 'function') rec.abort()
+    else rec.stop()
+  } catch {
+    // ignore
+  }
+}
+
 function stopSpeaking() {
   state.speakSession += 1
   if (window.speechSynthesis) {
-    window.speechSynthesis.cancel()
+    try {
+      window.speechSynthesis.cancel()
+    } catch {
+      // ignore
+    }
   }
   state.speaking = false
 }
 
 function speakChinese(text) {
+  // Must stay synchronous with the button click, or mobile browsers mute TTS.
+  hardStopMic()
+
   if (!window.speechSynthesis) {
-    state.feedback = { type: 'warn', message: '这个浏览器不支持中文朗读，请自己看屏幕上的中文。' }
+    state.feedback = { type: 'warn', message: '这个浏览器不支持中文朗读，请看屏幕上的中文。' }
     render('patch')
     return
   }
 
-  stopSpeaking()
-  void stopListening().then(() => {
-    const speakSession = state.speakSession
-    const utter = new SpeechSynthesisUtterance(text)
-    utter.lang = 'zh-CN'
-    const voices = window.speechSynthesis.getVoices()
-    const zh =
-      voices.find((v) => v.lang === 'zh-CN') ||
-      voices.find((v) => v.lang?.startsWith('zh')) ||
-      null
-    if (zh) utter.voice = zh
-    utter.rate = 0.95
-    state.speaking = true
-    state.feedback = { type: 'info', message: '正在读中文…' }
-    render('patch')
+  state.speakSession += 1
+  const speakSession = state.speakSession
+  try {
+    window.speechSynthesis.cancel()
+  } catch {
+    // ignore
+  }
 
-    const afterSpeech = () => {
-      if (speakSession !== state.speakSession) return
-      state.speaking = false
-      state.feedback = { type: 'info', message: '请按麦克风，用英文回答' }
-      render('patch')
+  const utter = new SpeechSynthesisUtterance(text)
+  utter.lang = 'zh-CN'
+  const zh = pickChineseVoice()
+  if (zh) utter.voice = zh
+  utter.rate = 0.92
+  utter.pitch = 1
+
+  state.speaking = true
+  state.feedback = { type: 'info', message: '正在读中文…' }
+  render('patch')
+
+  const finish = (ok) => {
+    if (speakSession !== state.speakSession) return
+    state.speaking = false
+    state.feedback = {
+      type: ok ? 'info' : 'warn',
+      message: ok ? '读完了。请自己点「说英文」麦克风。' : '中文朗读失败，请看屏幕文字，再点麦克风说英文。',
     }
+    render('patch')
+  }
 
-    utter.onend = afterSpeech
-    utter.onerror = afterSpeech
+  utter.onend = () => finish(true)
+  utter.onerror = () => finish(false)
+
+  try {
+    // Speak immediately inside the tap gesture.
     window.speechSynthesis.speak(utter)
-  })
+    // Chrome sometimes stays paused after cancel(); nudge it.
+    if (window.speechSynthesis.paused) {
+      window.speechSynthesis.resume()
+    }
+  } catch {
+    finish(false)
+  }
 }
 
 function stopListening() {
-  state.listenSession += 1
-  state.listening = false
-  const rec = state.recognition
-  if (!rec) return Promise.resolve()
-
-  return new Promise((resolve) => {
-    let settled = false
-    const finish = () => {
-      if (settled) return
-      settled = true
-      if (state.recognition === rec) state.recognition = null
-      resolve()
-    }
-
-    const timer = window.setTimeout(finish, 500)
-    rec.onresult = null
-    rec.onerror = null
-    rec.onend = () => {
-      window.clearTimeout(timer)
-      finish()
-    }
-
-    try {
-      // abort() releases the mic more reliably than stop() for restarts
-      if (typeof rec.abort === 'function') rec.abort()
-      else rec.stop()
-    } catch {
-      window.clearTimeout(timer)
-      finish()
-    }
-  })
+  hardStopMic()
+  return Promise.resolve()
 }
 
-function startRecognitionAttempt(session, attempt = 0) {
-  if (session !== state.listenSession || state.view !== 'practice') return
+function startListening() {
+  if (!SpeechRecognition) {
+    state.feedback = {
+      type: 'warn',
+      message: '这个浏览器不支持语音识别，请用下方输入框，或换 Chrome / Edge。',
+    }
+    render('patch')
+    return
+  }
+
+  // Stop Chinese audio first; keep this sync with the mic tap.
+  stopSpeaking()
+  hardStopMic()
+
+  const session = state.listenSession + 1
+  state.listenSession = session
+  if (!state.awaitingRetry) state.heard = ''
 
   const recognition = new SpeechRecognition()
   recognition.lang = 'en-US'
-  recognition.interimResults = true
+  recognition.interimResults = false
   recognition.continuous = false
-  recognition.maxAlternatives = 3
+  recognition.maxAlternatives = 1
   state.recognition = recognition
   state.listening = true
-  state.feedback = { type: 'info', message: '正在听你说英文…' }
+  state.feedback = { type: 'info', message: '请说英文…' }
   render('patch')
 
   let finalized = false
 
   recognition.onresult = (event) => {
     if (session !== state.listenSession) return
-    let interim = ''
-    let finalText = ''
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const transcript = event.results[i][0].transcript
-      if (event.results[i].isFinal) finalText += transcript
-      else interim += transcript
-    }
-    state.heard = (finalText || interim).trim()
+    const transcript = event.results?.[0]?.[0]?.transcript?.trim() || ''
+    if (!transcript || finalized) return
+    finalized = true
+    state.heard = transcript
     render('patch')
-    if (finalText && !finalized) {
-      finalized = true
-      evaluateAnswer(finalText.trim())
-    }
+    evaluateAnswer(transcript)
   }
 
   recognition.onerror = (event) => {
     if (session !== state.listenSession) return
-    // aborted is expected when we intentionally restart
     if (event.error === 'aborted') return
     state.listening = false
+    state.recognition = null
     if (event.error === 'no-speech') {
-      state.feedback = { type: 'warn', message: '没听到声音，请再点麦克风。' }
+      state.feedback = { type: 'warn', message: '没听到声音，请再点「说英文」。' }
     } else if (event.error === 'not-allowed') {
       state.feedback = { type: 'warn', message: '请允许麦克风权限后再试。' }
     } else if (event.error === 'network') {
-      state.feedback = { type: 'warn', message: '语音识别需要网络，请检查连线后再试。' }
+      state.feedback = { type: 'warn', message: '语音识别需要网络，请检查连线。' }
     } else {
-      state.feedback = { type: 'warn', message: `识别出错：${event.error}，请再点麦克风。` }
+      state.feedback = { type: 'warn', message: `识别失败（${event.error}），请再点「说英文」。` }
     }
     render('patch')
   }
@@ -375,8 +405,10 @@ function startRecognitionAttempt(session, attempt = 0) {
   recognition.onend = () => {
     if (state.recognition === recognition) state.recognition = null
     if (session !== state.listenSession) return
-    state.listening = false
-    render('patch')
+    if (state.listening) {
+      state.listening = false
+      render('patch')
+    }
   }
 
   try {
@@ -384,53 +416,13 @@ function startRecognitionAttempt(session, attempt = 0) {
   } catch {
     state.listening = false
     state.recognition = null
-    if (attempt < 3) {
-      window.setTimeout(() => startRecognitionAttempt(session, attempt + 1), 280 + attempt * 120)
-      return
-    }
-    state.feedback = { type: 'warn', message: '麦克风还没准备好，请再点一次。' }
+    state.feedback = { type: 'warn', message: '麦克风启动失败，请再点一次「说英文」。' }
     render('patch')
   }
-}
-
-function startListening() {
-  if (!SpeechRecognition) {
-    state.feedback = {
-      type: 'warn',
-      message: '这个浏览器不支持语音识别，请用下方输入框练习，或换 Chrome / Edge。',
-    }
-    render('patch')
-    return
-  }
-
-  stopSpeaking()
-  const session = state.listenSession + 1
-  void stopListening().then(() => {
-    // stopListening bumps listenSession; restore the session we intend to start
-    state.listenSession = session
-    if (!state.awaitingRetry) state.heard = ''
-    startRecognitionAttempt(session, 0)
-  })
 }
 
 function evaluateAnswer(heard) {
-  // Close this mic turn without racing a brand-new start.
-  state.listenSession += 1
-  state.listening = false
-  const rec = state.recognition
-  state.recognition = null
-  if (rec) {
-    try {
-      rec.onresult = null
-      rec.onerror = null
-      rec.onend = null
-      if (typeof rec.abort === 'function') rec.abort()
-      else rec.stop()
-    } catch {
-      // ignore
-    }
-  }
-
+  hardStopMic()
   state.attemptCount += 1
   state.heard = heard
 
@@ -455,7 +447,7 @@ function evaluateAnswer(heard) {
   const tip = alts.length ? `也可以说：${alts.slice(0, 2).join(' / ')}` : ''
   state.feedback = {
     type: 'bad',
-    message: tip ? `不太对，请再按麦克风讲一次：（${tip}）` : '不太对，请再按麦克风讲一次：',
+    message: tip ? `不太对，请再点「说英文」：（${tip}）` : '不太对，请再点「说英文」：',
     answer: expected,
   }
   render('patch')
@@ -467,27 +459,44 @@ function rebuildPool() {
 
 function nextSentence(fromCorrect = false) {
   stopSpeaking()
-  void stopListening().then(() => {
-    const next = pickRandom(state.current?.id)
-    if (!next) {
-      state.feedback = { type: 'warn', message: '请至少选择一个题库。' }
-      render('full')
-      return
-    }
-    state.current = next
-    state.awaitingRetry = false
-    state.heard = ''
-    state.feedback = {
-      type: 'info',
-      message: fromCorrect
-        ? '下一题：先点「听中文」，再点麦克风说英文'
-        : '先点「听中文」，再点麦克风说英文',
-    }
+  hardStopMic()
+  const next = pickRandom(state.current?.id)
+  if (!next) {
+    state.feedback = { type: 'warn', message: '请至少选择一个题库。' }
     render('full')
-  })
+    return
+  }
+  state.current = next
+  state.awaitingRetry = false
+  state.heard = ''
+  state.feedback = {
+    type: 'info',
+    message: fromCorrect
+      ? '下一题：先点「听中文」，再点「说英文」'
+      : '先点「听中文」，再点「说英文」',
+  }
+  render('full')
+}
+
+function unlockSpeech() {
+  if (!window.speechSynthesis) return
+  try {
+    window.speechSynthesis.getVoices()
+    // Warm up TTS inside a user gesture (needed on many phones).
+    const warm = new SpeechSynthesisUtterance('。')
+    warm.lang = 'zh-CN'
+    warm.volume = 0
+    const zh = pickChineseVoice()
+    if (zh) warm.voice = zh
+    window.speechSynthesis.speak(warm)
+    window.speechSynthesis.cancel()
+  } catch {
+    // ignore
+  }
 }
 
 function startPractice() {
+  unlockSpeech()
   rebuildPool()
   if (!state.pool.length) return
   state.view = 'practice'
@@ -571,7 +580,7 @@ function renderPractice() {
   return `
     <div class="shell" data-practice="1">
       <div class="topbar">
-        <h1>对练</h1>
+        <h1>对练 <small class="ver">${APP_VERSION}</small></h1>
         <div class="stats">
           <span>答对 <b data-el="correct">${state.correctCount}</b></span>
           <span>作答 <b data-el="attempts">${state.attemptCount}</b></span>
@@ -604,7 +613,7 @@ function renderPractice() {
             <button class="btn btn-primary" data-action="submit-typed" type="button">提交</button>
           </div>
         </div>
-        <p class="hint">请手动操作：点「听中文」听提示，点麦克风再说英文。不会自动抢麦。</p>
+        <p class="hint">完全手动：点「听中文」才朗读；点「说英文」才开麦克风。不会自动进行。</p>
       </section>
     </div>
   `
@@ -687,20 +696,18 @@ app.addEventListener('click', (event) => {
   if (action === 'start') startPractice()
   if (action === 'home') {
     stopSpeaking()
-    void stopListening().then(() => {
-      state.view = 'home'
-      render('full')
-    })
+    hardStopMic()
+    state.view = 'home'
+    render('full')
   }
   if (action === 'replay' && state.current) {
     speakChinese(state.current.zh)
   }
   if (action === 'mic') {
     if (state.listening) {
-      void stopListening().then(() => {
-        state.feedback = { type: 'info', message: '已停止。要说英文时再点麦克风。' }
-        render('patch')
-      })
+      hardStopMic()
+      state.feedback = { type: 'info', message: '已停止。要说英文时再点「说英文」。' }
+      render('patch')
     } else {
       startListening()
     }
