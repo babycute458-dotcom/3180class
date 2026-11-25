@@ -27,7 +27,7 @@ async function loadTransformers() {
   return transformersMod
 }
 
-async function createTranscriber(remoteHost) {
+async function createTranscriber(remoteHost, onStatus) {
   const { pipeline, env } = await loadTransformers()
   if (remoteHost) env.remoteHost = remoteHost
   return pipeline('automatic-speech-recognition', MODEL_ID, {
@@ -41,6 +41,7 @@ async function createTranscriber(remoteHost) {
       } else if (data.status === 'initiate') {
         setLoadStatus('download', progress || 0, '开始下载语音模型（约 40MB，仅首次）…')
       }
+      onStatus?.(getSttLoadStatus())
     },
   })
 }
@@ -56,7 +57,7 @@ export function loadSttEngine(onStatus) {
       let lastError
       for (const host of hosts) {
         try {
-          const t = await createTranscriber(host)
+          const t = await createTranscriber(host, onStatus)
           setLoadStatus('ready', 100, '语音模型已就绪')
           onStatus?.(getSttLoadStatus())
           return t

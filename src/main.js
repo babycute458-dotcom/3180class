@@ -25,7 +25,7 @@ const state = {
 }
 
 const app = document.querySelector('#app')
-const APP_VERSION = 'v13'
+const APP_VERSION = 'v14'
 const TTS_RELEASE_MS = 900
 
 function normalize(text) {
@@ -158,8 +158,11 @@ function onSttStatus(status) {
   } else if (status.phase === 'download' || status.phase === 'transcribe') {
     state.sttLoading = true
   }
-  if (status.message && (state.micStarting || state.micBusy || state.sttLoading)) {
+  // Only hijack the status line when the user is actively waiting on mic/STT.
+  if (status.message && (state.micStarting || state.micBusy)) {
     state.feedback = { type: 'info', message: status.message }
+    render('patch')
+  } else if (status.phase === 'ready' && state.view === 'practice' && !state.listening && !state.micBusy) {
     render('patch')
   }
 }
@@ -416,7 +419,7 @@ function statusPill() {
 }
 
 function micLabel() {
-  if (state.micStarting || state.sttLoading && !state.listening) return '准备中…'
+  if (state.micStarting) return '准备中…'
   if (state.micBusy) return '识别中…'
   if (state.listening) return '我说完了'
   if (state.awaitingRetry) return '再讲一次'
