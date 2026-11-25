@@ -1,5 +1,6 @@
 import './style.css'
 import { SENTENCES, SETS } from './sentences.js'
+import { sameMeaning } from './meaning.js'
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
 
@@ -24,34 +25,8 @@ const state = {
 }
 
 const app = document.querySelector('#app')
-
-const STOP_WORDS = new Set([
-  'a',
-  'an',
-  'the',
-  'to',
-  'for',
-  'of',
-  'in',
-  'on',
-  'at',
-  'please',
-  'just',
-  'really',
-  'very',
-  'so',
-  'too',
-  'some',
-  'any',
-  'my',
-  'your',
-  'our',
-  'me',
-  'you',
-])
-
 function normalize(text) {
-  return text
+  return String(text || '')
     .toLowerCase()
     .replace(/[’']/g, "'")
     .replace(/[^a-z0-9'\s]/g, ' ')
@@ -59,244 +34,8 @@ function normalize(text) {
     .trim()
 }
 
-function tokenize(text) {
-  return normalize(text).split(' ').filter(Boolean)
-}
-
-function levenshtein(a, b) {
-  const m = a.length
-  const n = b.length
-  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0))
-  for (let i = 0; i <= m; i++) dp[i][0] = i
-  for (let j = 0; j <= n; j++) dp[0][j] = j
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1
-      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost)
-    }
-  }
-  return dp[m][n]
-}
-
-/** Meaning-preserving rewrites for spoken English variants. */
-function canonicalize(text) {
-  let t = normalize(text)
-
-  // contractions
-  const contractions = [
-    [/\bwhat's\b/g, 'what is'],
-    [/\bwho's\b/g, 'who is'],
-    [/\bwhere's\b/g, 'where is'],
-    [/\bhow's\b/g, 'how is'],
-    [/\bthat's\b/g, 'that is'],
-    [/\bthere's\b/g, 'there is'],
-    [/\bi'm\b/g, 'i am'],
-    [/\byou're\b/g, 'you are'],
-    [/\bwe're\b/g, 'we are'],
-    [/\bthey're\b/g, 'they are'],
-    [/\bi've\b/g, 'i have'],
-    [/\byou've\b/g, 'you have'],
-    [/\bwe've\b/g, 'we have'],
-    [/\bi'll\b/g, 'i will'],
-    [/\byou'll\b/g, 'you will'],
-    [/\bwe'll\b/g, 'we will'],
-    [/\bi'd\b/g, 'i would'],
-    [/\byou'd\b/g, 'you would'],
-    [/\bdon't\b/g, 'do not'],
-    [/\bdoesn't\b/g, 'does not'],
-    [/\bdidn't\b/g, 'did not'],
-    [/\bcan't\b/g, 'cannot'],
-    [/\bcannot\b/g, 'can not'],
-    [/\bwon't\b/g, 'will not'],
-    [/\bisn't\b/g, 'is not'],
-    [/\baren't\b/g, 'are not'],
-    [/\bwasn't\b/g, 'was not'],
-    [/\bweren't\b/g, 'were not'],
-    [/\bhaven't\b/g, 'have not'],
-    [/\bhasn't\b/g, 'has not'],
-    [/\bcouldn't\b/g, 'could not'],
-    [/\bwouldn't\b/g, 'would not'],
-    [/\bshouldn't\b/g, 'should not'],
-    [/\blet's\b/g, 'let us'],
-  ]
-  for (const [re, to] of contractions) t = t.replace(re, to)
-
-  // phrase-level meaning equivalents
-  const phrases = [
-    [/\bhow do you say\b/g, 'what do you call'],
-    [/\bhow do you call\b/g, 'what do you call'],
-    [/\bwhat is this called\b/g, 'what do you call this'],
-    [/\bwhat is it called\b/g, 'what do you call this'],
-    [/\bhow can i say\b/g, 'what do you call'],
-    [/\bhow to say\b/g, 'what do you call'],
-    [/\bsplit the check\b/g, 'split the bill'],
-    [/\bgo dutch\b/g, 'split the bill'],
-    [/\btake a look at\b/g, 'look at'],
-    [/\bhave a look at\b/g, 'look at'],
-    [/\blog in to\b/g, 'log into'],
-    [/\bsign into\b/g, 'log into'],
-    [/\bsign in to\b/g, 'log into'],
-    [/\bget off work\b/g, 'leave work'],
-    [/\bfinish work\b/g, 'leave work'],
-    [/\bhang out with\b/g, 'hang out'],
-    [/\border takeaway\b/g, 'order takeout'],
-    [/\border take out\b/g, 'order takeout'],
-    [/\bright now\b/g, 'now'],
-    [/\bat the moment\b/g, 'now'],
-    // true synonym phrases only (not near-miss meaning changes)
-    [/\bi know what you mean\b/g, 'i see what you mean'],
-    [/\bi understand what you mean\b/g, 'i see what you mean'],
-    [/\bi get what you mean\b/g, 'i see what you mean'],
-    [/\bi know what you are saying\b/g, 'i see what you mean'],
-    [/\bi understand what you are saying\b/g, 'i see what you mean'],
-    [/\bi get what you are saying\b/g, 'i see what you mean'],
-    [/\bi know your point\b/g, 'i see your point'],
-    [/\bi understand your point\b/g, 'i see your point'],
-    [/\bi get your point\b/g, 'i see your point'],
-    [/\bi see your point\b/g, 'i see what you mean'],
-    [/\blike the most\b/g, 'like most'],
-    [/\blike the best\b/g, 'like most'],
-    [/\blike best\b/g, 'like most'],
-  ]
-  for (const [re, to] of phrases) t = t.replace(re, to)
-
-  // word-level near-synonyms for this practice set
-  const words = [
-    [/\bcould\b/g, 'can'],
-    [/\bmay\b/g, 'can'],
-    [/\bmight\b/g, 'can'],
-    [/\bfavourite\b/g, 'favorite'],
-    [/\bcolour\b/g, 'color'],
-    [/\bgonna\b/g, 'going to'],
-    [/\bwanna\b/g, 'want to'],
-    [/\bgotta\b/g, 'have to'],
-    [/\bhave got to\b/g, 'have to'],
-    [/\bok\b/g, 'okay'],
-    [/\balright\b/g, 'okay'],
-    [/\bye[sp]\b/g, 'yes'],
-    [/\bcoworkers\b/g, 'colleagues'],
-    [/\bcolleagues\b/g, 'coworkers'],
-    [/\bmum\b/g, 'mother'],
-    [/\bmom\b/g, 'mother'],
-    [/\bmummy\b/g, 'mother'],
-    [/\bmommy\b/g, 'mother'],
-    [/\bdad\b/g, 'father'],
-    [/\bdaddy\b/g, 'father'],
-    [/\brestroom\b/g, 'bathroom'],
-    [/\btoilet\b/g, 'bathroom'],
-    [/\bwashroom\b/g, 'bathroom'],
-    [/\bfilm\b/g, 'movie'],
-    [/\bfilms\b/g, 'movies'],
-    [/\bit\b/g, 'this'],
-  ]
-  for (const [re, to] of words) t = t.replace(re, to)
-
-  // drop soft fillers that do not change meaning
-  t = t
-    .replace(/\bplease\b/g, ' ')
-    .replace(/\bjust\b/g, ' ')
-    .replace(/\breally\b/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-
-  return t
-}
-
-/** Collapse true paraphrases into a meaning skeleton (keep meaning distinctions). */
-function meaningSkeleton(text) {
-  let t = canonicalize(text)
-
-  // understand / see / know what you mean
-  t = t.replace(/\bi see what you mean\b/g, 'understand you')
-  t = t.replace(/\bi see your point\b/g, 'understand you')
-
-  // what's your favorite X  ==  which X do you like most
-  // but NOT "which kind of X" (that asks for type/genre)
-  t = t.replace(/\bwhat is your favorite (\w+)\b/g, 'ask prefer $1')
-  t = t.replace(/\bwhat is favorite (\w+)\b/g, 'ask prefer $1')
-  t = t.replace(/\b(?:which|what) (\w+) do you like most\b/g, 'ask prefer $1')
-  t = t.replace(/\b(?:which|what) (\w+) do you prefer\b/g, 'ask prefer $1')
-
-  // keep "kind/type/sort of X" as a different intent
-  t = t.replace(/\b(?:which|what) kind of (\w+)\b/g, 'ask type $1')
-  t = t.replace(/\b(?:which|what) type of (\w+)\b/g, 'ask type $1')
-  t = t.replace(/\b(?:which|what) sort of (\w+)\b/g, 'ask type $1')
-
-  t = t.replace(/\bhow have you been(?: lately)?\b/g, 'ask wellbeing')
-  t = t.replace(/\bwhat do you do for a living\b/g, 'ask job')
-  t = t.replace(/\bwhat is your job\b/g, 'ask job')
-
-  return t.replace(/\s+/g, ' ').trim()
-}
-
-function contentTokens(text) {
-  return canonicalize(text)
-    .split(' ')
-    .filter((w) => w && !STOP_WORDS.has(w))
-}
-
-function similarEnough(a, b) {
-  if (!a || !b) return false
-  if (a === b) return true
-
-  const dist = levenshtein(a, b)
-  const maxLen = Math.max(a.length, b.length)
-  if (maxLen <= 12) return dist <= 2
-  if (maxLen <= 28) return dist <= 3
-  if (maxLen <= 48) return dist <= 4
-  return dist / maxLen <= 0.18
-}
-
-function contentSimilar(heard, expected) {
-  const ta = contentTokens(heard)
-  const tb = contentTokens(expected)
-  if (!ta.length || !tb.length) return false
-  if (ta.join(' ') === tb.join(' ')) return true
-  if (similarEnough(ta.join(' '), tb.join(' '))) return true
-
-  // Same multiset of content words, even if order is slightly off
-  if (ta.length === tb.length && [...ta].sort().join(' ') === [...tb].sort().join(' ')) return true
-
-  // High overlap of content words (meaning reached) with similar length
-  const setB = new Set(tb)
-  const overlap = ta.filter((w) => setB.has(w)).length
-  const coverage = overlap / Math.max(tb.length, 1)
-  const lengthRatio = Math.min(ta.length, tb.length) / Math.max(ta.length, tb.length)
-  return coverage >= 0.8 && lengthRatio >= 0.7 && Math.abs(ta.length - tb.length) <= 2
-}
-
-function meaningSimilar(heard, expected) {
-  const a = meaningSkeleton(heard)
-  const b = meaningSkeleton(expected)
-  if (!a || !b) return false
-  if (a === b) return true
-
-  // Same preference topic, but never equate "type/kind" with "favorite item"
-  const preferA = a.match(/\bask prefer (\w+)\b/)
-  const preferB = b.match(/\bask prefer (\w+)\b/)
-  if (preferA && preferB && preferA[1] === preferB[1]) return true
-
-  const typeA = a.match(/\bask type (\w+)\b/)
-  const typeB = b.match(/\bask type (\w+)\b/)
-  if (typeA && preferB) return false
-  if (preferA && typeB) return false
-  if (typeA && typeB && typeA[1] === typeB[1]) return true
-
-  return similarEnough(a, b)
-}
-
 function isMatch(heard, expected, alts = []) {
-  const raw = normalize(heard)
-  if (!raw) return false
-
-  const candidates = [expected, ...(alts || [])].filter(Boolean)
-  for (const candidate of candidates) {
-    if (normalize(heard) === normalize(candidate)) return true
-    if (canonicalize(heard) === canonicalize(candidate)) return true
-    if (meaningSimilar(heard, candidate)) return true
-    if (contentSimilar(heard, candidate)) return true
-  }
-  return false
+  return sameMeaning(heard, expected, alts)
 }
 
 function pickRandom(excludeId) {
@@ -311,7 +50,7 @@ function pickRandom(excludeId) {
   return next
 }
 
-const APP_VERSION = 'v7'
+const APP_VERSION = 'v8'
 const MIC_COOLDOWN_MS = 350
 
 function pickChineseVoice() {
@@ -777,7 +516,7 @@ function renderPractice() {
             <button class="btn btn-primary" data-action="submit-typed" type="button">提交</button>
           </div>
         </div>
-        <p class="hint">完全手动：点「听中文」才朗读；点「说英文」才开麦克风。不会自动进行。</p>
+        <p class="hint">完全手动：点「听中文」才朗读；点「说英文」才开麦克风。判分看意思：同义说法可过，意思不同不过。</p>
       </section>
     </div>
   `
