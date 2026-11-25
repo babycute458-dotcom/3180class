@@ -143,6 +143,18 @@ function canonicalize(text) {
     [/\border take out\b/g, 'order takeout'],
     [/\bright now\b/g, 'now'],
     [/\bat the moment\b/g, 'now'],
+    // preference / favorite paraphrases
+    [/\bwhich kind of\b/g, 'which'],
+    [/\bwhat kind of\b/g, 'which'],
+    [/\bwhich type of\b/g, 'which'],
+    [/\bwhat type of\b/g, 'which'],
+    [/\bwhich sort of\b/g, 'which'],
+    [/\bwhat sort of\b/g, 'which'],
+    [/\blike the most\b/g, 'like most'],
+    [/\blike the best\b/g, 'like most'],
+    [/\blike best\b/g, 'like most'],
+    [/\blove the most\b/g, 'like most'],
+    [/\bprefer the most\b/g, 'like most'],
   ]
   for (const [re, to] of phrases) t = t.replace(re, to)
 
@@ -171,6 +183,8 @@ function canonicalize(text) {
     [/\brestroom\b/g, 'bathroom'],
     [/\btoilet\b/g, 'bathroom'],
     [/\bwashroom\b/g, 'bathroom'],
+    [/\bfilm\b/g, 'movie'],
+    [/\bfilms\b/g, 'movies'],
     [/\bit\b/g, 'this'],
   ]
   for (const [re, to] of words) t = t.replace(re, to)
@@ -184,6 +198,35 @@ function canonicalize(text) {
     .trim()
 
   return t
+}
+
+/** Collapse common question paraphrases into a meaning skeleton. */
+function meaningSkeleton(text) {
+  let t = canonicalize(text)
+
+  // what's your favorite X / what is your favourite X
+  t = t.replace(/\bwhat is your favorite (\w+)\b/g, 'ask prefer $1')
+  t = t.replace(/\bwhat is favorite (\w+)\b/g, 'ask prefer $1')
+  t = t.replace(/\byour favorite (\w+)\b/g, 'prefer $1')
+
+  // which/what (kind of) X do you like most/best
+  t = t.replace(/\b(?:which|what) (\w+) do you like most\b/g, 'ask prefer $1')
+  t = t.replace(/\b(?:which|what) (\w+) do you prefer\b/g, 'ask prefer $1')
+  t = t.replace(/\b(?:which|what) (\w+) are you into\b/g, 'ask prefer $1')
+
+  // do you have a favorite X
+  t = t.replace(/\bdo you have a favorite (\w+)\b/g, 'ask prefer $1')
+
+  // how have you been / how are you lately
+  t = t.replace(/\bhow have you been(?: lately)?\b/g, 'ask wellbeing')
+  t = t.replace(/\bhow are you(?: doing)?(?: today| lately)?\b/g, 'ask wellbeing')
+
+  // what do you do / what is your job
+  t = t.replace(/\bwhat do you do for a living\b/g, 'ask job')
+  t = t.replace(/\bwhat is your job\b/g, 'ask job')
+  t = t.replace(/\bwhat do you do\b/g, 'ask job')
+
+  return t.replace(/\s+/g, ' ').trim()
 }
 
 function contentTokens(text) {
@@ -222,6 +265,20 @@ function contentSimilar(heard, expected) {
   return coverage >= 0.8 && lengthRatio >= 0.7 && Math.abs(ta.length - tb.length) <= 2
 }
 
+function meaningSimilar(heard, expected) {
+  const a = meaningSkeleton(heard)
+  const b = meaningSkeleton(expected)
+  if (!a || !b) return false
+  if (a === b) return true
+
+  // Same "ask prefer X" topic even if wording still differs slightly
+  const preferA = a.match(/\bask prefer (\w+)\b/)
+  const preferB = b.match(/\bask prefer (\w+)\b/)
+  if (preferA && preferB && preferA[1] === preferB[1]) return true
+
+  return similarEnough(a, b)
+}
+
 function isMatch(heard, expected, alts = []) {
   const raw = normalize(heard)
   if (!raw) return false
@@ -230,6 +287,7 @@ function isMatch(heard, expected, alts = []) {
   for (const candidate of candidates) {
     if (normalize(heard) === normalize(candidate)) return true
     if (canonicalize(heard) === canonicalize(candidate)) return true
+    if (meaningSimilar(heard, candidate)) return true
     if (contentSimilar(heard, candidate)) return true
   }
   return false
@@ -247,7 +305,7 @@ function pickRandom(excludeId) {
   return next
 }
 
-const APP_VERSION = 'v5'
+const APP_VERSION = 'v6'
 const MIC_COOLDOWN_MS = 350
 
 function pickChineseVoice() {
