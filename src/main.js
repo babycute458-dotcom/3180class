@@ -1,7 +1,15 @@
 import './style.css'
 import { SENTENCES, SETS } from './sentences.js'
 import { sameMeaning } from './meaning.js'
-import { canRecordAudio, createRecorder, loadSttEngine, transcribeBlob } from './stt.js'
+import {
+  canRecordAudio,
+  canUseWebSpeech,
+  createRecorder,
+  createWebSpeechSession,
+  isAppleMobile,
+  loadSttEngine,
+  transcribeBlob,
+} from './stt.js'
 
 const state = {
   view: 'home',
@@ -20,13 +28,17 @@ const state = {
   voicesReady: false,
   speakSession: 0,
   recorder: null,
+  webSpeech: null,
+  webSpeechDone: null,
+  engine: null, // 'webspeech' | 'whisper'
   sttReady: false,
   sttLoading: false,
+  emptyListenCount: 0,
 }
 
 const app = document.querySelector('#app')
-const APP_VERSION = 'v14'
-const TTS_RELEASE_MS = 900
+const APP_VERSION = 'v15'
+const TTS_RELEASE_MS = 600
 
 function normalize(text) {
   return String(text || '')
@@ -90,7 +102,15 @@ function cancelRecording() {
   } catch {
     // ignore
   }
+  try {
+    state.webSpeech?.cancel?.()
+  } catch {
+    // ignore
+  }
   state.recorder = null
+  state.webSpeech = null
+  state.webSpeechDone = null
+  state.engine = null
   state.listening = false
   state.micStarting = false
   state.micBusy = false
@@ -174,98 +194,170 @@ async function ensureStt() {
   state.sttLoading = false
 }
 
-async function startListening() {
-  if (!canRecordAudio()) {
-    state.feedback = {
-      type: 'warn',
-      message: '这个浏览器不能录音，请用下方输入框，或换最新版 Chrome。',
-    }
-    render('patch')
-    return
+function noteEmptyListen(message) {
+  state.emptyListenCount += 1
+  let tip = message
+  if (state.emptyListenCount >= 2 && isAppleMobile()) {
+    tip += ' 若一直不行：请用 Safari 打开本页，并允许麦克风。'
   }
+  state.feedback = { type: 'warn', message: tip }
+  render('patch')
+}
 
+async function startWebSpeechListening() {
+  const session = createWebSpeechSession()
+  const done = session.start({
+    onPartial: (preview) => {
+      if (!state.listening) return
+      state.heard = preview || state.heard
+      render('patch')
+    },
+  })
+  state.webSpeech = session
+  state.webSpeechDone = done
+  state.engine = 'webspeech'
+  state.listening = true
+  state.micStarting = false
+  if (!state.awaitingRetry) state.heard = ''
+  state.feedback = { type: 'info', message: '正在听…说完后点「我说完了」。' }
+  render('patch')
+}
+
+async function startWhisperListening() {
+  if (!canRecordAudio()) {
+    throw new Error('recorder-unavailable')
+  }
+  try {
+    await ensureStt()
+  } catch (err) {
+    const detail = err?.message ? `（${err.message}）` : ''
+    throw new Error(`语音模型加载失败${detail}`)
+  }
+  const recorder = createRecorder()
+  await recorder.start()
+  state.recorder = recorder
+  state.engine = 'whisper'
+  state.listening = true
+  state.micStarting = false
+  if (!state.awaitingRetry) state.heard = ''
+  state.feedback = { type: 'info', message: '正在听…说完后点「我说完了」。' }
+  render('patch')
+}
+
+async function startListening() {
   if (state.listening || state.micStarting || state.micBusy) return
 
   stopSpeaking()
-  // Give TTS a moment to release the audio device.
   state.micStarting = true
   state.feedback = { type: 'info', message: '正在打开麦克风…' }
   render('patch')
   await sleep(TTS_RELEASE_MS)
 
+  // Prefer system Web Speech on phones — Whisper WASM often returns empty on iOS.
+  const preferWeb = canUseWebSpeech()
   try {
-    await ensureStt()
-  } catch (err) {
-    state.micStarting = false
-    const detail = err?.message ? `（${err.message}）` : ''
-    state.feedback = {
-      type: 'warn',
-      message: `语音模型加载失败${detail}。请检查网络后重试，或先用下方打字提交。`,
+    if (preferWeb) {
+      try {
+        await startWebSpeechListening()
+        return
+      } catch (err) {
+        console.warn('[mic] webspeech start failed, falling back', err)
+      }
     }
-    render('patch')
-    return
-  }
-
-  try {
-    const recorder = createRecorder()
-    await recorder.start()
-    state.recorder = recorder
-    state.listening = true
-    state.micStarting = false
-    if (!state.awaitingRetry) state.heard = ''
-    state.feedback = { type: 'info', message: '正在听…说完后点「我说完了」。' }
-    render('patch')
+    await startWhisperListening()
   } catch (err) {
     state.micStarting = false
     state.listening = false
     state.recorder = null
+    state.webSpeech = null
     const denied = err?.name === 'NotAllowedError' || err?.name === 'SecurityError'
     state.feedback = {
       type: 'warn',
-      message: denied ? '请允许麦克风权限后再试。' : '无法打开麦克风，请检查权限后重试。',
+      message: denied
+        ? '请允许麦克风权限后再试。'
+        : err?.message?.includes('语音模型')
+          ? `${err.message}。也可直接用下方打字。`
+          : '无法打开麦克风，请检查权限后重试，或用下方打字。',
     }
     render('patch')
   }
 }
 
 async function finishListening() {
-  if (!state.listening || !state.recorder) return
+  if (!state.listening) return
 
+  const engine = state.engine
   state.listening = false
   state.micBusy = true
   state.feedback = { type: 'info', message: '正在识别英文…' }
   render('patch')
 
+  if (engine === 'webspeech' && state.webSpeech) {
+    const session = state.webSpeech
+    const done = state.webSpeechDone
+    state.webSpeech = null
+    state.webSpeechDone = null
+    try {
+      session.stop()
+      const result = await Promise.race([
+        done,
+        sleep(4000).then(() => ({ text: '', errorCode: 'timeout', stopRequested: true })),
+      ])
+      state.micBusy = false
+      state.engine = null
+      const text = String(result?.text || '').trim()
+      if (text) {
+        state.emptyListenCount = 0
+        evaluateAnswer(text)
+        return
+      }
+      if (result?.errorCode === 'not-allowed') {
+        noteEmptyListen('请允许麦克风权限后再试。')
+        return
+      }
+      noteEmptyListen('没听清英文，请再点「说英文」大声说清楚，或用下方打字。')
+    } catch (err) {
+      state.micBusy = false
+      state.engine = null
+      noteEmptyListen('识别失败，请再试一次，或用下方打字。')
+    }
+    return
+  }
+
+  if (!state.recorder) {
+    state.micBusy = false
+    return
+  }
+
   const recorder = state.recorder
   state.recorder = null
+  state.engine = null
 
   try {
     const { blob, durationMs } = await recorder.stop()
-    if (durationMs < 350 || !blob || blob.size < 80) {
+    if (durationMs < 450 || !blob || blob.size < 120) {
       state.micBusy = false
-      state.feedback = { type: 'warn', message: '时间太短或没有声音，请再点「说英文」。' }
-      render('patch')
+      noteEmptyListen('时间太短或没有声音，请再点「说英文」。')
       return
     }
 
     const text = await transcribeBlob(blob, onSttStatus)
     state.micBusy = false
     if (!text) {
-      state.feedback = { type: 'warn', message: '没听清英文，请再说一次，或用下方打字。' }
-      render('patch')
+      noteEmptyListen('没听清英文，请再说一次，或用下方打字。')
       return
     }
+    state.emptyListenCount = 0
     evaluateAnswer(text)
   } catch (err) {
     state.micBusy = false
-    state.feedback = {
-      type: 'warn',
-      message:
-        err?.message === 'empty-audio'
-          ? '没录到声音，请再点「说英文」。'
-          : '识别失败，请再试一次，或用下方打字提交。',
+    if (err?.message === 'silent-audio') {
+      noteEmptyListen('麦克风好像没录到声音。请允许麦克风权限，或改用 Safari 打开后再试。')
+    } else if (err?.message === 'empty-audio') {
+      noteEmptyListen('没录到声音，请再点「说英文」。')
+    } else {
+      noteEmptyListen('识别失败，请再试一次，或用下方打字提交。')
     }
-    render('patch')
   }
 }
 
@@ -346,8 +438,10 @@ function unlockSpeech() {
 
 function startPractice() {
   unlockSpeech()
-  // Warm Whisper download in the background after user gesture.
-  void ensureStt().catch(() => {})
+  // Only preload Whisper when Web Speech is unavailable.
+  if (!canUseWebSpeech()) {
+    void ensureStt().catch(() => {})
+  }
   rebuildPool()
   if (!state.pool.length) return
   state.view = 'practice'
@@ -399,7 +493,7 @@ function renderHome() {
         ${
           !canRecordAudio()
             ? `<div class="unsupported">当前浏览器可能无法录音。建议使用最新版 Chrome；也可以在练习页用键盘输入。</div>`
-            : `<p class="hint">提示：先点「听中文」，再点「说英文」开口，说完点「我说完了」。第一次会下载语音模型。</p>`
+            : `<p class="hint">提示：先点「听中文」，再点「说英文」开口，说完点「我说完了」。手机请允许麦克风。</p>`
         }
       </section>
     </div>
@@ -467,7 +561,7 @@ function renderPractice() {
             <button class="btn btn-primary" data-action="submit-typed" type="button">提交</button>
           </div>
         </div>
-        <p class="hint">用法：点「说英文」开始说 → 说完点「我说完了」。不依赖 Google 语音，网络不稳也能用（首次需下载模型）。</p>
+        <p class="hint">用法：点「说英文」开始说 → 说完点「我说完了」。手机请用 Safari/Chrome 打开并允许麦克风；说英文时请大声一点。</p>
       </section>
     </div>
   `

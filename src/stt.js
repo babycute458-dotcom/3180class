@@ -5,12 +5,23 @@ const TARGET_SAMPLE_RATE = 16000
 const TRANSFORMERS_CDN =
   'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js'
 
+const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition
+
 let transformersMod = null
 let transcriberPromise = null
 let loadStatus = { phase: 'idle', progress: 0, message: '' }
 
 export function getSttLoadStatus() {
   return { ...loadStatus }
+}
+
+export function canUseWebSpeech() {
+  return typeof SpeechRecognitionAPI === 'function'
+}
+
+export function isAppleMobile() {
+  const ua = navigator.userAgent || ''
+  return /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 }
 
 function setLoadStatus(phase, progress, message) {
@@ -84,13 +95,11 @@ export function loadSttEngine(onStatus) {
 }
 
 function pickRecorderMime() {
-  const candidates = [
-    'audio/webm;codecs=opus',
-    'audio/webm',
-    'audio/mp4',
-    'audio/ogg;codecs=opus',
-  ]
   if (typeof MediaRecorder === 'undefined') return ''
+  // iOS only supports mp4/aac — preferring webm first makes some WebKits pick a bad path.
+  const candidates = isAppleMobile()
+    ? ['audio/mp4', 'audio/aac', 'audio/wav', 'audio/webm']
+    : ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus']
   return candidates.find((t) => MediaRecorder.isTypeSupported(t)) || ''
 }
 
@@ -104,23 +113,40 @@ function downsampleTo16k(float32, inputRate) {
   const outLen = Math.max(1, Math.round(float32.length / ratio))
   const out = new Float32Array(outLen)
   for (let i = 0; i < outLen; i += 1) {
-    const start = Math.floor(i * ratio)
-    const end = Math.min(Math.floor((i + 1) * ratio), float32.length)
-    let sum = 0
-    let count = 0
-    for (let j = start; j < end; j += 1) {
-      sum += float32[j]
-      count += 1
-    }
-    out[i] = count ? sum / count : float32[start] || 0
+    const idx = i * ratio
+    const i0 = Math.floor(idx)
+    const i1 = Math.min(i0 + 1, float32.length - 1)
+    const frac = idx - i0
+    out[i] = float32[i0] * (1 - frac) + float32[i1] * frac
   }
   return out
 }
 
+function rmsLevel(float32) {
+  if (!float32?.length) return 0
+  let sum = 0
+  const step = Math.max(1, Math.floor(float32.length / 4000))
+  let n = 0
+  for (let i = 0; i < float32.length; i += step) {
+    const v = float32[i]
+    sum += v * v
+    n += 1
+  }
+  return n ? Math.sqrt(sum / n) : 0
+}
+
 async function blobToMono16k(blob) {
   const arrayBuf = await blob.arrayBuffer()
-  const ctx = new AudioContext()
+  const AC = window.AudioContext || window.webkitAudioContext
+  const ctx = new AC()
   try {
+    if (ctx.state === 'suspended') {
+      try {
+        await ctx.resume()
+      } catch {
+        // ignore
+      }
+    }
     const decoded = await ctx.decodeAudioData(arrayBuf.slice(0))
     const ch0 = decoded.getChannelData(0)
     let mono = ch0
@@ -129,7 +155,7 @@ async function blobToMono16k(blob) {
       mono = new Float32Array(ch0.length)
       for (let i = 0; i < ch0.length; i += 1) mono[i] = (ch0[i] + ch1[i]) * 0.5
     }
-    return downsampleTo16k(mono, decoded.sampleRate)
+    return { audio: downsampleTo16k(mono, decoded.sampleRate), rms: rmsLevel(mono) }
   } finally {
     try {
       await ctx.close()
@@ -165,7 +191,12 @@ export function createRecorder() {
       if (event.data && event.data.size > 0) chunks.push(event.data)
     }
     startedAt = Date.now()
-    recorder.start(250)
+    // timeslice helps some mobile browsers flush audio chunks
+    try {
+      recorder.start(200)
+    } catch {
+      recorder.start()
+    }
   }
 
   function stop() {
@@ -176,7 +207,7 @@ export function createRecorder() {
       }
       const rec = recorder
       const stream = mediaStream
-      const mime = rec.mimeType || 'audio/webm'
+      const mime = rec.mimeType || (isAppleMobile() ? 'audio/mp4' : 'audio/webm')
 
       const finish = () => {
         try {
@@ -205,6 +236,11 @@ export function createRecorder() {
         return
       }
       rec.onstop = finish
+      try {
+        if (rec.state === 'recording') rec.requestData?.()
+      } catch {
+        // ignore
+      }
       try {
         rec.stop()
       } catch (err) {
@@ -237,19 +273,121 @@ export async function transcribeBlob(blob, onStatus) {
   setLoadStatus('transcribe', 0, '正在识别英文…')
   onStatus?.(getSttLoadStatus())
 
-  const audio = await blobToMono16k(blob)
+  const { audio, rms } = await blobToMono16k(blob)
   if (!audio.length) {
     throw new Error('empty-audio')
   }
+  if (rms < 0.0008) {
+    throw new Error('silent-audio')
+  }
 
+  // xenova v2 accepts Float32Array; also pass sampling_rate explicitly.
   const result = await transcriber(audio, {
     language: 'english',
     task: 'transcribe',
     return_timestamps: false,
+    sampling_rate: TARGET_SAMPLE_RATE,
   })
 
-  const text = String(result?.text || '').trim()
+  let text = String(result?.text || '').trim()
+  // Whisper sometimes emits only punctuation / blanks on bad audio.
+  text = text.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, '').trim()
+  if (!/[a-zA-Z]/.test(text)) text = ''
+
   setLoadStatus('ready', 100, '语音模型已就绪')
   onStatus?.(getSttLoadStatus())
   return text
+}
+
+/**
+ * Push-to-talk Web Speech session.
+ * start() begins; stop() resolves with final transcript (may be '').
+ */
+export function createWebSpeechSession() {
+  if (!canUseWebSpeech()) {
+    throw new Error('web-speech-unavailable')
+  }
+
+  let recognition = null
+  let finals = []
+  let interim = ''
+  let stopRequested = false
+  let errorCode = null
+  let settle = null
+
+  function start({ onPartial } = {}) {
+    finals = []
+    interim = ''
+    stopRequested = false
+    errorCode = null
+
+    recognition = new SpeechRecognitionAPI()
+    recognition.lang = 'en-US'
+    recognition.continuous = true
+    recognition.interimResults = true
+    recognition.maxAlternatives = 3
+
+    const done = new Promise((resolve, reject) => {
+      settle = { resolve, reject }
+    })
+
+    recognition.onresult = (event) => {
+      let nextInterim = ''
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const result = event.results[i]
+        const alt0 = result?.[0]?.transcript?.trim() || ''
+        if (!alt0) continue
+        if (result.isFinal) finals.push(alt0)
+        else nextInterim += (nextInterim ? ' ' : '') + alt0
+      }
+      interim = nextInterim
+      const preview = [...finals, interim].filter(Boolean).join(' ').trim()
+      onPartial?.(preview)
+    }
+
+    recognition.onerror = (event) => {
+      errorCode = event.error || 'error'
+      // no-speech / aborted are handled when stop settles
+    }
+
+    recognition.onend = () => {
+      const text = [...finals, interim].filter(Boolean).join(' ').trim()
+      const payload = { text, errorCode, stopRequested }
+      recognition = null
+      settle?.resolve(payload)
+      settle = null
+    }
+
+    recognition.start()
+    return done
+  }
+
+  function stop() {
+    stopRequested = true
+    try {
+      recognition?.stop?.()
+    } catch {
+      try {
+        recognition?.abort?.()
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  function cancel() {
+    stopRequested = true
+    try {
+      recognition?.abort?.()
+    } catch {
+      try {
+        recognition?.stop?.()
+      } catch {
+        // ignore
+      }
+    }
+    recognition = null
+  }
+
+  return { start, stop, cancel }
 }
