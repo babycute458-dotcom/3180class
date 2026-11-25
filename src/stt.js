@@ -300,10 +300,12 @@ export async function transcribeBlob(blob, onStatus) {
 }
 
 /**
- * Push-to-talk Web Speech session.
- * start() begins; stop() resolves with final transcript (may be '').
+ * Web Speech session.
+ * On iPhone use continuous:false (one-shot). Desktop can use push-to-talk.
+ * IMPORTANT: start() must be called directly inside a user-gesture stack
+ * (no await/sleep before recognition.start()).
  */
-export function createWebSpeechSession() {
+export function createWebSpeechSession({ continuous = false } = {}) {
   if (!canUseWebSpeech()) {
     throw new Error('web-speech-unavailable')
   }
@@ -323,12 +325,12 @@ export function createWebSpeechSession() {
 
     recognition = new SpeechRecognitionAPI()
     recognition.lang = 'en-US'
-    recognition.continuous = true
+    recognition.continuous = !!continuous
     recognition.interimResults = true
     recognition.maxAlternatives = 3
 
-    const done = new Promise((resolve, reject) => {
-      settle = { resolve, reject }
+    const done = new Promise((resolve) => {
+      settle = { resolve }
     })
 
     recognition.onresult = (event) => {
@@ -347,7 +349,6 @@ export function createWebSpeechSession() {
 
     recognition.onerror = (event) => {
       errorCode = event.error || 'error'
-      // no-speech / aborted are handled when stop settles
     }
 
     recognition.onend = () => {
@@ -358,6 +359,7 @@ export function createWebSpeechSession() {
       settle = null
     }
 
+    // Must run in the same turn as the tap on iOS.
     recognition.start()
     return done
   }

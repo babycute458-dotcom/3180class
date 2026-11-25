@@ -37,8 +37,8 @@ const state = {
 }
 
 const app = document.querySelector('#app')
-const APP_VERSION = 'v15'
-const TTS_RELEASE_MS = 600
+const APP_VERSION = 'v16'
+const TTS_RELEASE_MS = 0
 
 function normalize(text) {
   return String(text || '')
@@ -204,13 +204,41 @@ function noteEmptyListen(message) {
   render('patch')
 }
 
-async function startWebSpeechListening() {
-  const session = createWebSpeechSession()
+function handleWebSpeechResult(result) {
+  if (state.engine !== 'webspeech') return
+  state.listening = false
+  state.micBusy = false
+  state.webSpeech = null
+  state.webSpeechDone = null
+  state.engine = null
+  const text = String(result?.text || '').trim()
+  if (text) {
+    state.emptyListenCount = 0
+    evaluateAnswer(text)
+    return
+  }
+  if (result?.errorCode === 'not-allowed') {
+    noteEmptyListen('请允许麦克风权限后再试。')
+    return
+  }
+  if (result?.errorCode === 'no-speech') {
+    noteEmptyListen('没听到声音，请再点「说英文」后马上开口。')
+    return
+  }
+  noteEmptyListen('没听清英文，请再点「说英文」大声说清楚，或用下方打字。')
+}
+
+function startWebSpeechListening() {
+  // iPhone: one-shot is far more reliable than continuous + manual stop.
+  const continuous = !isAppleMobile()
+  const session = createWebSpeechSession({ continuous })
   const done = session.start({
     onPartial: (preview) => {
-      if (!state.listening) return
-      state.heard = preview || state.heard
-      render('patch')
+      if (!state.listening && state.engine !== 'webspeech') return
+      if (preview) {
+        state.heard = preview
+        render('patch')
+      }
     },
   })
   state.webSpeech = session
@@ -219,22 +247,30 @@ async function startWebSpeechListening() {
   state.listening = true
   state.micStarting = false
   if (!state.awaitingRetry) state.heard = ''
-  state.feedback = { type: 'info', message: '正在听…说完后点「我说完了」。' }
+  state.feedback = {
+    type: 'info',
+    message: continuous
+      ? '正在听…说完后点「我说完了」。'
+      : '请现在说英文…说完稍等，会自动识别。',
+  }
   render('patch')
+
+  // One-shot: auto-finish when the browser ends recognition.
+  if (!continuous) {
+    void done.then((result) => {
+      if (state.engine !== 'webspeech') return
+      handleWebSpeechResult(result)
+    })
+  }
 }
 
 async function startWhisperListening() {
   if (!canRecordAudio()) {
     throw new Error('recorder-unavailable')
   }
-  try {
-    await ensureStt()
-  } catch (err) {
-    const detail = err?.message ? `（${err.message}）` : ''
-    throw new Error(`语音模型加载失败${detail}`)
-  }
+  // Invoke getUserMedia in this turn BEFORE loading the model (iOS gesture).
   const recorder = createRecorder()
-  await recorder.start()
+  const started = recorder.start()
   state.recorder = recorder
   state.engine = 'whisper'
   state.listening = true
@@ -242,45 +278,45 @@ async function startWhisperListening() {
   if (!state.awaitingRetry) state.heard = ''
   state.feedback = { type: 'info', message: '正在听…说完后点「我说完了」。' }
   render('patch')
+  await started
+  // Warm model while user speaks.
+  void ensureStt().catch(() => {})
 }
 
-async function startListening() {
+function startListening() {
   if (state.listening || state.micStarting || state.micBusy) return
 
+  // Keep this fully synchronous until recognition.start()/getUserMedia() —
+  // any await before that breaks iPhone mic permission / speech start.
   stopSpeaking()
   state.micStarting = true
   state.feedback = { type: 'info', message: '正在打开麦克风…' }
   render('patch')
-  await sleep(TTS_RELEASE_MS)
 
-  // Prefer system Web Speech on phones — Whisper WASM often returns empty on iOS.
-  const preferWeb = canUseWebSpeech()
   try {
-    if (preferWeb) {
-      try {
-        await startWebSpeechListening()
-        return
-      } catch (err) {
-        console.warn('[mic] webspeech start failed, falling back', err)
-      }
+    if (canUseWebSpeech()) {
+      startWebSpeechListening()
+      return
     }
-    await startWhisperListening()
   } catch (err) {
+    console.warn('[mic] webspeech start failed, falling back', err)
+  }
+
+  void startWhisperListening().catch((err) => {
     state.micStarting = false
     state.listening = false
     state.recorder = null
     state.webSpeech = null
+    state.engine = null
     const denied = err?.name === 'NotAllowedError' || err?.name === 'SecurityError'
     state.feedback = {
       type: 'warn',
       message: denied
         ? '请允许麦克风权限后再试。'
-        : err?.message?.includes('语音模型')
-          ? `${err.message}。也可直接用下方打字。`
-          : '无法打开麦克风，请检查权限后重试，或用下方打字。',
+        : '无法打开麦克风，请检查权限后重试，或用下方打字。',
     }
     render('patch')
-  }
+  })
 }
 
 async function finishListening() {
@@ -295,30 +331,18 @@ async function finishListening() {
   if (engine === 'webspeech' && state.webSpeech) {
     const session = state.webSpeech
     const done = state.webSpeechDone
-    state.webSpeech = null
-    state.webSpeechDone = null
     try {
       session.stop()
       const result = await Promise.race([
         done,
         sleep(4000).then(() => ({ text: '', errorCode: 'timeout', stopRequested: true })),
       ])
+      handleWebSpeechResult(result)
+    } catch {
       state.micBusy = false
       state.engine = null
-      const text = String(result?.text || '').trim()
-      if (text) {
-        state.emptyListenCount = 0
-        evaluateAnswer(text)
-        return
-      }
-      if (result?.errorCode === 'not-allowed') {
-        noteEmptyListen('请允许麦克风权限后再试。')
-        return
-      }
-      noteEmptyListen('没听清英文，请再点「说英文」大声说清楚，或用下方打字。')
-    } catch (err) {
-      state.micBusy = false
-      state.engine = null
+      state.webSpeech = null
+      state.webSpeechDone = null
       noteEmptyListen('识别失败，请再试一次，或用下方打字。')
     }
     return
@@ -515,7 +539,10 @@ function statusPill() {
 function micLabel() {
   if (state.micStarting) return '准备中…'
   if (state.micBusy) return '识别中…'
-  if (state.listening) return '我说完了'
+  if (state.listening) {
+    // iPhone one-shot auto-ends; desktop uses manual 「我说完了」.
+    return isAppleMobile() && state.engine === 'webspeech' ? '听写中…点此取消' : '我说完了'
+  }
   if (state.awaitingRetry) return '再讲一次'
   return '说英文'
 }
@@ -561,7 +588,7 @@ function renderPractice() {
             <button class="btn btn-primary" data-action="submit-typed" type="button">提交</button>
           </div>
         </div>
-        <p class="hint">用法：点「说英文」开始说 → 说完点「我说完了」。手机请用 Safari/Chrome 打开并允许麦克风；说英文时请大声一点。</p>
+        <p class="hint">手机：点「说英文」后马上开口，说完稍等会自动识别。电脑：说完再点「我说完了」。请用 Safari / Chrome，并允许麦克风。</p>
       </section>
     </div>
   `
