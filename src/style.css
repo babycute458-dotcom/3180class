@@ -207,7 +207,6 @@ button {
 
 .btn-mic.listening {
   background: var(--bad);
-  animation: pulse 1.2s ease infinite;
 }
 
 /* —— Practice —— */
@@ -217,7 +216,6 @@ button {
   justify-content: space-between;
   gap: 1rem;
   margin-bottom: 1.25rem;
-  animation: rise 0.45s ease both;
 }
 
 .topbar h1 {
@@ -243,7 +241,6 @@ button {
   border-radius: 28px;
   padding: clamp(1.4rem, 4vw, 2.2rem);
   box-shadow: var(--shadow-soft);
-  animation: rise 0.55s ease both;
 }
 
 .prompt-label {
@@ -260,7 +257,7 @@ button {
   font-size: clamp(1.8rem, 5vw, 2.6rem);
   line-height: 1.25;
   margin: 0 0 1.2rem;
-  animation: fade-in 0.4s ease both;
+  min-height: 2.6em;
 }
 
 .status-row {
@@ -313,13 +310,17 @@ button {
   font-weight: 600;
 }
 
-.correction {
+.correction-slot {
+  min-height: 0;
   margin: 0 0 1.2rem;
+}
+
+.correction {
+  margin: 0;
   padding: 1rem 1.1rem;
   border-radius: 14px;
   background: var(--bad-bg);
   color: var(--bad);
-  animation: shake 0.35s ease;
 }
 
 .correction .answer {

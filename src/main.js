@@ -19,7 +19,6 @@ const state = {
   voicesReady: false,
   listenSession: 0,
   speakSession: 0,
-  autoListenAfterSpeech: true,
 }
 
 const app = document.querySelector('#app')
@@ -254,14 +253,14 @@ function stopSpeaking() {
   state.speaking = false
 }
 
-function speakChinese(text, { autoListen = state.autoListenAfterSpeech } = {}) {
+function speakChinese(text) {
   if (!window.speechSynthesis) {
-    if (autoListen) window.setTimeout(() => startListening(), 250)
+    state.feedback = { type: 'warn', message: '这个浏览器不支持中文朗读，请自己看屏幕上的中文。' }
+    render('patch')
     return
   }
 
   stopSpeaking()
-  // Make sure mic is fully released before TTS, then again before next listen.
   void stopListening().then(() => {
     const speakSession = state.speakSession
     const utter = new SpeechSynthesisUtterance(text)
@@ -274,19 +273,14 @@ function speakChinese(text, { autoListen = state.autoListenAfterSpeech } = {}) {
     if (zh) utter.voice = zh
     utter.rate = 0.95
     state.speaking = true
-    render()
+    state.feedback = { type: 'info', message: '正在读中文…' }
+    render('patch')
 
     const afterSpeech = () => {
       if (speakSession !== state.speakSession) return
       state.speaking = false
-      render()
-      // Chrome often blocks SpeechRecognition if started in the same tick as TTS end.
-      if (autoListen && state.view === 'practice') {
-        window.setTimeout(() => {
-          if (speakSession !== state.speakSession) return
-          startListening()
-        }, 350)
-      }
+      state.feedback = { type: 'info', message: '请按麦克风，用英文回答' }
+      render('patch')
     }
 
     utter.onend = afterSpeech
@@ -340,7 +334,7 @@ function startRecognitionAttempt(session, attempt = 0) {
   state.recognition = recognition
   state.listening = true
   state.feedback = { type: 'info', message: '正在听你说英文…' }
-  render()
+  render('patch')
 
   let finalized = false
 
@@ -354,7 +348,7 @@ function startRecognitionAttempt(session, attempt = 0) {
       else interim += transcript
     }
     state.heard = (finalText || interim).trim()
-    render()
+    render('patch')
     if (finalText && !finalized) {
       finalized = true
       evaluateAnswer(finalText.trim())
@@ -367,22 +361,22 @@ function startRecognitionAttempt(session, attempt = 0) {
     if (event.error === 'aborted') return
     state.listening = false
     if (event.error === 'no-speech') {
-      state.feedback = { type: 'warn', message: '没听到声音，请再点「开始说」。' }
+      state.feedback = { type: 'warn', message: '没听到声音，请再点麦克风。' }
     } else if (event.error === 'not-allowed') {
       state.feedback = { type: 'warn', message: '请允许麦克风权限后再试。' }
     } else if (event.error === 'network') {
       state.feedback = { type: 'warn', message: '语音识别需要网络，请检查连线后再试。' }
     } else {
-      state.feedback = { type: 'warn', message: `识别出错：${event.error}，请再点一次。` }
+      state.feedback = { type: 'warn', message: `识别出错：${event.error}，请再点麦克风。` }
     }
-    render()
+    render('patch')
   }
 
   recognition.onend = () => {
     if (state.recognition === recognition) state.recognition = null
     if (session !== state.listenSession) return
     state.listening = false
-    render()
+    render('patch')
   }
 
   try {
@@ -394,8 +388,8 @@ function startRecognitionAttempt(session, attempt = 0) {
       window.setTimeout(() => startRecognitionAttempt(session, attempt + 1), 280 + attempt * 120)
       return
     }
-    state.feedback = { type: 'warn', message: '麦克风还没准备好，请再点一次「开始说」。' }
-    render()
+    state.feedback = { type: 'warn', message: '麦克风还没准备好，请再点一次。' }
+    render('patch')
   }
 }
 
@@ -405,7 +399,7 @@ function startListening() {
       type: 'warn',
       message: '这个浏览器不支持语音识别，请用下方输入框练习，或换 Chrome / Edge。',
     }
-    render()
+    render('patch')
     return
   }
 
@@ -414,7 +408,7 @@ function startListening() {
   void stopListening().then(() => {
     // stopListening bumps listenSession; restore the session we intend to start
     state.listenSession = session
-    state.heard = state.awaitingRetry ? state.heard : ''
+    if (!state.awaitingRetry) state.heard = ''
     startRecognitionAttempt(session, 0)
   })
 }
@@ -450,10 +444,10 @@ function evaluateAnswer(heard) {
       type: 'good',
       message: exact ? '正确！' : '意思对了，通过！',
     }
-    render()
+    render('patch')
     window.setTimeout(() => {
       nextSentence(true)
-    }, 750)
+    }, 900)
     return
   }
 
@@ -461,16 +455,10 @@ function evaluateAnswer(heard) {
   const tip = alts.length ? `也可以说：${alts.slice(0, 2).join(' / ')}` : ''
   state.feedback = {
     type: 'bad',
-    message: tip ? `不太对，请再讲一次：（${tip}）` : '不太对，请再讲一次：',
+    message: tip ? `不太对，请再按麦克风讲一次：（${tip}）` : '不太对，请再按麦克风讲一次：',
     answer: expected,
   }
-  render()
-  // Re-open mic after a short gap so the second listen actually starts.
-  window.setTimeout(() => {
-    if (state.view === 'practice' && state.awaitingRetry && !state.listening && !state.speaking) {
-      startListening()
-    }
-  }, 450)
+  render('patch')
 }
 
 function rebuildPool() {
@@ -483,17 +471,19 @@ function nextSentence(fromCorrect = false) {
     const next = pickRandom(state.current?.id)
     if (!next) {
       state.feedback = { type: 'warn', message: '请至少选择一个题库。' }
-      render()
+      render('full')
       return
     }
     state.current = next
     state.awaitingRetry = false
     state.heard = ''
-    state.feedback = fromCorrect
-      ? { type: 'info', message: '下一题 · 听完中文后请说英文' }
-      : { type: 'info', message: '听中文，然后用英文回答' }
-    render()
-    window.setTimeout(() => speakChinese(next.zh, { autoListen: true }), 220)
+    state.feedback = {
+      type: 'info',
+      message: fromCorrect
+        ? '下一题：先点「听中文」，再点麦克风说英文'
+        : '先点「听中文」，再点麦克风说英文',
+    }
+    render('full')
   })
 }
 
@@ -549,48 +539,61 @@ function renderHome() {
         ${
           !SpeechRecognition
             ? `<div class="unsupported">当前浏览器可能不支持语音识别。建议使用 Chrome 或 Edge；也可以在练习页用键盘输入。</div>`
-            : `<p class="hint">提示：第一次点「开始说」时，浏览器会请求麦克风权限。</p>`
+            : `<p class="hint">提示：练习时先点「听中文」，再自己点麦克风说英文。</p>`
         }
       </section>
     </div>
   `
 }
 
+function statusPill() {
+  const fb = state.feedback
+  if (fb?.type === 'good') return { className: 'pill good', text: fb.message }
+  if (fb?.type === 'bad') return { className: 'pill bad', text: '需要纠正' }
+  if (fb?.type === 'warn') return { className: 'pill warn', text: fb.message }
+  if (state.listening) return { className: 'pill warn', text: '正在听…' }
+  if (state.speaking) return { className: 'pill', text: '正在读中文…' }
+  if (fb?.message) return { className: 'pill', text: fb.message }
+  return { className: 'pill', text: '先点「听中文」' }
+}
+
+function micLabel() {
+  if (state.listening) return '听写中…点此停止'
+  if (state.awaitingRetry) return '再讲一次'
+  return '说英文'
+}
+
 function renderPractice() {
   const s = state.current
   const fb = state.feedback
-  let pill = ''
-  if (fb?.type === 'good') pill = `<span class="pill good">${escapeHtml(fb.message)}</span>`
-  else if (fb?.type === 'bad') pill = `<span class="pill bad">需要纠正</span>`
-  else if (fb?.type === 'warn') pill = `<span class="pill warn">${escapeHtml(fb.message)}</span>`
-  else if (state.listening) pill = `<span class="pill warn">正在听…</span>`
-  else if (state.speaking) pill = `<span class="pill">正在读中文…</span>`
-  else if (fb?.message) pill = `<span class="pill">${escapeHtml(fb.message)}</span>`
+  const pill = statusPill()
 
   return `
-    <div class="shell">
+    <div class="shell" data-practice="1">
       <div class="topbar">
         <h1>对练</h1>
         <div class="stats">
-          <span>答对 <b>${state.correctCount}</b></span>
-          <span>作答 <b>${state.attemptCount}</b></span>
+          <span>答对 <b data-el="correct">${state.correctCount}</b></span>
+          <span>作答 <b data-el="attempts">${state.attemptCount}</b></span>
           <button class="btn btn-ghost" data-action="home" type="button">返回</button>
         </div>
       </div>
       <section class="stage">
-        <p class="prompt-label">请用英文说出</p>
-        <h2 class="prompt-zh">${escapeHtml(s?.zh || '')}</h2>
-        <div class="status-row">${pill}</div>
-        <p class="heard">你说的：<strong>${escapeHtml(state.heard || '—')}</strong></p>
-        ${
-          fb?.type === 'bad'
-            ? `<div class="correction">${escapeHtml(fb.message)}<span class="answer">${escapeHtml(fb.answer)}</span></div>`
-            : ''
-        }
+        <p class="prompt-label">中文提示</p>
+        <h2 class="prompt-zh" data-el="zh">${escapeHtml(s?.zh || '')}</h2>
+        <div class="status-row" data-el="status"><span class="${pill.className}">${escapeHtml(pill.text)}</span></div>
+        <p class="heard">你说的：<strong data-el="heard">${escapeHtml(state.heard || '—')}</strong></p>
+        <div class="correction-slot" data-el="correction">
+          ${
+            fb?.type === 'bad'
+              ? `<div class="correction">${escapeHtml(fb.message)}<span class="answer">${escapeHtml(fb.answer)}</span></div>`
+              : ''
+          }
+        </div>
         <div class="actions">
-          <button class="btn btn-ghost" data-action="replay" type="button">再听中文</button>
-          <button class="btn btn-mic ${state.listening ? 'listening' : ''}" data-action="mic" type="button">
-            ${state.listening ? '听写中…' : state.awaitingRetry ? '再讲一次' : '开始说'}
+          <button class="btn btn-ghost" data-action="replay" type="button" data-el="zh-btn">听中文</button>
+          <button class="btn btn-mic ${state.listening ? 'listening' : ''}" data-action="mic" type="button" data-el="mic">
+            ${micLabel()}
           </button>
           <button class="btn btn-ghost" data-action="skip" type="button">跳过 / 下一题</button>
         </div>
@@ -601,14 +604,74 @@ function renderPractice() {
             <button class="btn btn-primary" data-action="submit-typed" type="button">提交</button>
           </div>
         </div>
-        <p class="hint">中文读完后会自动开始听英文。说对进入下一题；说错会显示正确答案并再次听取。</p>
+        <p class="hint">请手动操作：点「听中文」听提示，点麦克风再说英文。不会自动抢麦。</p>
       </section>
     </div>
   `
 }
 
-function render() {
-  app.innerHTML = state.view === 'home' ? renderHome() : renderPractice()
+function patchPractice() {
+  const root = app.querySelector('[data-practice]')
+  if (!root) {
+    render('full')
+    return
+  }
+
+  const setText = (sel, value) => {
+    const el = root.querySelector(sel)
+    if (el && el.textContent !== value) el.textContent = value
+  }
+
+  setText('[data-el="correct"]', String(state.correctCount))
+  setText('[data-el="attempts"]', String(state.attemptCount))
+  setText('[data-el="zh"]', state.current?.zh || '')
+  setText('[data-el="heard"]', state.heard || '—')
+
+  const pill = statusPill()
+  const status = root.querySelector('[data-el="status"]')
+  if (status) {
+    const current = status.querySelector('.pill')
+    if (!current || current.className !== pill.className || current.textContent !== pill.text) {
+      status.innerHTML = `<span class="${pill.className}">${escapeHtml(pill.text)}</span>`
+    }
+  }
+
+  const correction = root.querySelector('[data-el="correction"]')
+  if (correction) {
+    const fb = state.feedback
+    const html =
+      fb?.type === 'bad'
+        ? `<div class="correction">${escapeHtml(fb.message)}<span class="answer">${escapeHtml(fb.answer)}</span></div>`
+        : ''
+    if (correction.innerHTML !== html) correction.innerHTML = html
+  }
+
+  const mic = root.querySelector('[data-el="mic"]')
+  if (mic) {
+    const label = micLabel()
+    if (mic.textContent.trim() !== label) mic.textContent = label
+    mic.classList.toggle('listening', state.listening)
+  }
+
+  const zhBtn = root.querySelector('[data-el="zh-btn"]')
+  if (zhBtn) zhBtn.disabled = !!state.speaking
+}
+
+function render(mode = 'full') {
+  if (state.view === 'home') {
+    app.innerHTML = renderHome()
+    return
+  }
+
+  if (mode === 'patch' && app.querySelector('[data-practice]')) {
+    patchPractice()
+    return
+  }
+
+  const typed = document.querySelector('#typed')?.value || ''
+  app.innerHTML = renderPractice()
+  const input = document.querySelector('#typed')
+  if (input && typed) input.value = typed
 }
 
 app.addEventListener('click', (event) => {
@@ -626,17 +689,17 @@ app.addEventListener('click', (event) => {
     stopSpeaking()
     void stopListening().then(() => {
       state.view = 'home'
-      render()
+      render('full')
     })
   }
   if (action === 'replay' && state.current) {
-    speakChinese(state.current.zh, { autoListen: true })
+    speakChinese(state.current.zh)
   }
   if (action === 'mic') {
     if (state.listening) {
       void stopListening().then(() => {
-        state.feedback = { type: 'info', message: '已停止听取' }
-        render()
+        state.feedback = { type: 'info', message: '已停止。要说英文时再点麦克风。' }
+        render('patch')
       })
     } else {
       startListening()
