@@ -8,6 +8,8 @@ export const NATIVE_STT_LANG = 'en-US'
 const MAX_LISTEN_MS = 8000
 const SILENCE_END_MS = 1100
 const STOP_TIMEOUT_MS = 1500
+const GUM_TIMEOUT_MS = 2500
+const PERM_TIMEOUT_MS = 12000
 
 export function isNativeApp() {
   try {
@@ -44,20 +46,19 @@ function withTimeout(promise, ms, fallback) {
 }
 
 /**
- * Force the iOS microphone privacy prompt via getUserMedia.
- * Native SFSpeechRecognizer alone sometimes never surfaces Settings toggles
- * on sideloaded builds; WKWebView mic access reliably creates them.
+ * Best-effort WebKit mic warm-up. NEVER hang the UI — always timed out.
+ * Mic may already be granted (Settings shows Microphone on); in that case
+ * getUserMedia can still deadlock on a busy AVAudioSession after TTS.
  */
 async function ensureWebkitMicPermission() {
   if (!navigator?.mediaDevices?.getUserMedia) {
     return { ok: false, reason: 'no-getUserMedia' }
   }
-  try {
+
+  let timedOut = false
+  const gumPromise = (async () => {
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-      },
+      audio: true,
       video: false,
     })
     for (const track of stream.getTracks()) {
@@ -68,81 +69,137 @@ async function ensureWebkitMicPermission() {
       }
     }
     return { ok: true, reason: 'granted' }
-  } catch (err) {
+  })().catch((err) => {
     const name = err?.name || ''
     if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
       return { ok: false, reason: 'denied' }
     }
     return { ok: false, reason: name || 'getUserMedia-failed' }
+  })
+
+  const result = await Promise.race([
+    gumPromise,
+    new Promise((resolve) => {
+      window.setTimeout(() => {
+        timedOut = true
+        resolve({ ok: false, reason: 'timeout' })
+      }, GUM_TIMEOUT_MS)
+    }),
+  ])
+
+  // If GUM later succeeds after timeout, still stop tracks.
+  if (timedOut) {
+    void gumPromise.then((late) => {
+      if (late?.ok) {
+        // tracks already stopped inside gumPromise on success
+      }
+    })
   }
+
+  return result
 }
 
 /**
- * Ask for Speech Recognition + Microphone. Must run inside a user gesture.
+ * Ask for Speech Recognition + Microphone. Must not block forever.
+ * onProgress?.(step) optional UI hook.
  * Returns { ok, status, detail }.
  */
-export async function ensureNativeSpeechPermission() {
+export async function ensureNativeSpeechPermission(onProgress) {
   if (!isNativeApp()) {
     return { ok: false, status: 'web', detail: 'not-native' }
   }
 
-  // 1) Force Microphone into iOS Settings via WebKit.
-  const mic = await ensureWebkitMicPermission()
-  if (!mic.ok && mic.reason === 'denied') {
-    return {
-      ok: false,
-      status: 'denied',
-      detail: 'microphone-denied',
-    }
-  }
+  const overall = withTimeout(
+    (async () => {
+      onProgress?.('mic')
+      // Mic warm-up is optional. Timeout/failure here must NOT block speech.
+      // User already has Microphone ON in Settings in the common failure case.
+      const mic = await ensureWebkitMicPermission()
+      if (!mic.ok && mic.reason === 'denied') {
+        // Hard deny — stop. Soft fail (timeout) — continue.
+        return {
+          ok: false,
+          status: 'denied',
+          detail: 'microphone-denied',
+        }
+      }
 
-  const plugin = await getPlugin()
-  if (!plugin) {
-    return { ok: false, status: 'unavailable', detail: 'no-plugin' }
-  }
+      onProgress?.('plugin')
+      const plugin = await getPlugin()
+      if (!plugin) {
+        return { ok: false, status: 'unavailable', detail: 'no-plugin' }
+      }
 
-  let available = { available: false }
-  try {
-    available = await withTimeout(plugin.available(), 3000, { available: false })
-  } catch {
-    available = { available: false }
-  }
-  if (!available?.available) {
-    return { ok: false, status: 'unavailable', detail: 'speech-unavailable' }
-  }
+      let available = { available: false }
+      try {
+        available = await withTimeout(plugin.available(), 2500, { available: false })
+      } catch {
+        available = { available: false }
+      }
+      if (!available?.available) {
+        return { ok: false, status: 'unavailable', detail: 'speech-unavailable' }
+      }
 
-  // 2) Speech-recognition permission (system dialog).
-  let status = 'prompt'
-  try {
-    const checked = await withTimeout(plugin.checkPermissions(), 3000, null)
-    status = checked?.speechRecognition || 'prompt'
-  } catch {
-    // ignore
-  }
+      onProgress?.('speech')
+      let status = 'prompt'
+      try {
+        const checked = await withTimeout(plugin.checkPermissions(), 2500, null)
+        status = checked?.speechRecognition || 'prompt'
+      } catch {
+        // ignore
+      }
 
-  if (status !== 'granted') {
-    try {
-      // Long window — user must tap 允許 on the system alert.
-      const requested = await withTimeout(plugin.requestPermissions(), 120000, null)
-      status = requested?.speechRecognition || status
-    } catch {
-      // ignore
-    }
-    try {
-      const checked = await withTimeout(plugin.checkPermissions(), 3000, null)
-      status = checked?.speechRecognition || status
-    } catch {
-      // ignore
-    }
-  }
+      if (status === 'granted') {
+        return {
+          ok: true,
+          status,
+          detail: mic.ok ? 'mic+speech' : `speech-ok:mic-${mic.reason}`,
+        }
+      }
 
-  if (status === 'granted') {
-    return { ok: true, status, detail: mic.ok ? 'mic+speech' : `speech-only:${mic.reason}` }
-  }
-  if (status === 'denied') {
-    return { ok: false, status, detail: 'speech-denied' }
-  }
-  return { ok: false, status: status || 'prompt', detail: 'speech-not-granted' }
+      if (status !== 'denied') {
+        try {
+          const requested = await withTimeout(
+            plugin.requestPermissions(),
+            PERM_TIMEOUT_MS,
+            null,
+          )
+          if (requested?.speechRecognition) {
+            status = requested.speechRecognition
+          }
+        } catch {
+          // ignore
+        }
+        try {
+          const checked = await withTimeout(plugin.checkPermissions(), 2500, null)
+          status = checked?.speechRecognition || status
+        } catch {
+          // ignore
+        }
+      }
+
+      if (status === 'granted') {
+        return {
+          ok: true,
+          status,
+          detail: mic.ok ? 'mic+speech' : `speech-ok:mic-${mic.reason}`,
+        }
+      }
+      if (status === 'denied') {
+        return { ok: false, status, detail: 'speech-denied' }
+      }
+      // Still prompt after timeout — allow start() to try; iOS may prompt then.
+      return {
+        ok: true,
+        status: status || 'prompt',
+        detail: `proceed-anyway:mic-${mic.reason}`,
+      }
+    })(),
+    16000,
+    { ok: false, status: 'timeout', detail: 'permission-flow-timeout' },
+  )
+
+  return overall
 }
 
 /**
@@ -248,8 +305,6 @@ export function createNativeSpeechSession() {
         const available = await withTimeout(plugin.available(), 2500, { available: false })
         if (!available?.available) throw new Error('native-speech-unavailable')
 
-        // Permissions should already be granted via ensureNativeSpeechPermission().
-        // Re-check; if not granted, fail clearly instead of listening to silence.
         let permStatus = 'prompt'
         try {
           const checked = await withTimeout(plugin.checkPermissions(), 2500, null)
@@ -257,9 +312,13 @@ export function createNativeSpeechSession() {
         } catch {
           // ignore
         }
-        if (permStatus !== 'granted') {
+        if (permStatus !== 'granted' && permStatus !== 'denied') {
           try {
-            const requested = await withTimeout(plugin.requestPermissions(), 60000, null)
+            const requested = await withTimeout(
+              plugin.requestPermissions(),
+              PERM_TIMEOUT_MS,
+              null,
+            )
             permStatus = requested?.speechRecognition || permStatus
           } catch {
             // ignore
@@ -269,9 +328,6 @@ export function createNativeSpeechSession() {
           const err = new Error('not-allowed')
           err.name = 'NotAllowedError'
           throw err
-        }
-        if (permStatus !== 'granted') {
-          throw new Error('permission-pending')
         }
 
         await withTimeout(plugin.stop(), STOP_TIMEOUT_MS, null)
@@ -302,17 +358,25 @@ export function createNativeSpeechSession() {
 
         if (closed) return
 
-        await plugin.start({
-          language: NATIVE_STT_LANG,
-          maxResults: 3,
-          prompt: '請說英文',
-          partialResults: true,
-          popup: false,
-        })
+        // plugin.start with partialResults resolves immediately when listening begins.
+        await withTimeout(
+          plugin.start({
+            language: NATIVE_STT_LANG,
+            maxResults: 3,
+            prompt: '請說英文',
+            partialResults: true,
+            popup: false,
+          }),
+          5000,
+          null,
+        )
       } catch (err) {
         const denied = err?.name === 'NotAllowedError' || err?.message === 'not-allowed'
+        const missing =
+          String(err?.message || '').toLowerCase().includes('missing permission') ||
+          String(err?.message || '').toLowerCase().includes('not authorized')
         finish({
-          errorCode: denied
+          errorCode: denied || missing
             ? 'not-allowed'
             : err?.message || 'start-failed',
         })

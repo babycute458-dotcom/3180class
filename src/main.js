@@ -44,7 +44,7 @@ const state = {
 }
 
 const app = document.querySelector('#app')
-const APP_VERSION = 'v21'
+const APP_VERSION = 'v22'
 const TTS_LANG = 'zh-TW'
 const TTS_RELEASE_MS = 0
 
@@ -206,8 +206,8 @@ async function ensureStt() {
 
 function permissionHelpText() {
   return (
-    '請刪除 App 後重裝。打開後點「說英文」時，系統會跳出「麥克風」與「語音辨識」權限，兩次都要點「允許」。' +
-    '授權後可到「設定 → 隱私權與安全性 → 麥克風／語音辨識」確認已開啟對練。'
+    '請到「設定 → 隱私權與安全性 → 語音辨識」開啟對練；麥克風也要保持開啟。' +
+    '若沒有「語音辨識」項目，請刪除 App 重裝後再點「說英文」，並在彈窗點允許。'
   )
 }
 
@@ -270,99 +270,129 @@ function handleWebSpeechResult(result) {
 }
 
 async function startNativeSpeechListening() {
-  state.feedback = {
-    type: 'info',
-    message: '請在接下來的系統彈窗點「允許」（麥克風／語音辨識）…',
-  }
-  render('patch')
-
-  const perm = await ensureNativeSpeechPermission()
-  state.nativePerm = perm
-  if (!perm.ok) {
-    state.micStarting = false
-    state.listening = false
-    state.micBusy = false
-    state.engine = null
-    const denied = perm.status === 'denied' || perm.detail?.includes('denied')
-    state.feedback = {
-      type: 'warn',
-      message: denied
-        ? `權限被拒絕。${permissionHelpText()}`
-        : `尚未取得麥克風／語音辨識權限（${perm.status}/${perm.detail}）。${permissionHelpText()}`,
-    }
-    render('patch')
-    return
-  }
-
-  const session = createNativeSpeechSession()
-  let done
-  try {
-    done = session.start({
-      onPartial: (preview) => {
-        if (!preview) return
-        state.heard = preview
-        render('patch')
-      },
-    })
-  } catch {
+  // Never leave the button stuck on「準備中」— hard cap the whole start path.
+  const startWatchdog = window.setTimeout(() => {
+    if (!state.micStarting) return
     state.micStarting = false
     state.listening = false
     state.micBusy = false
     state.engine = null
     state.feedback = {
       type: 'warn',
-      message: 'App 語音辨識啟動失敗，請重試或用下方打字。',
+      message: `啟動逾時。${permissionHelpText()}也可先用下方打字。`,
     }
     render('patch')
-    return
-  }
-
-  state.webSpeech = session
-  state.webSpeechDone = done
-  state.engine = 'native'
-  state.listening = true
-  state.micStarting = false
-  state.micBusy = false
-  if (!state.awaitingRetry) state.heard = ''
-  state.feedback = {
-    type: 'info',
-    message: '請現在說英文…說完會自動辨識，或點「我說完了」。',
-  }
-  render('patch')
-
-  // Hard UI watchdog — never leave the pill on「正在聽」forever.
-  const watch = sleep(10000).then(() => ({
-    text: state.heard || '',
-    errorCode: 'timeout',
-    stopRequested: true,
-  }))
+  }, 18000)
 
   try {
-    const result = await Promise.race([done, watch])
-    if (state.engine === 'native') {
-      try {
-        await session.stop?.()
-      } catch {
-        // ignore
+    state.feedback = {
+      type: 'info',
+      message: '正在準備麥克風…',
+    }
+    render('patch')
+
+    const perm = await ensureNativeSpeechPermission((step) => {
+      const messages = {
+        mic: '正在準備麥克風…',
+        plugin: '正在載入語音辨識…',
+        speech: '請在系統彈窗點「允許」（語音辨識）…',
       }
+      state.feedback = { type: 'info', message: messages[step] || '準備中…' }
+      state.nativePerm = { ok: false, status: 'pending', detail: step }
+      render('patch')
+    })
+    state.nativePerm = perm
+
+    if (!perm.ok && (perm.status === 'denied' || perm.detail?.includes('denied'))) {
+      state.micStarting = false
+      state.listening = false
+      state.micBusy = false
+      state.engine = null
+      state.feedback = {
+        type: 'warn',
+        message: `權限被拒絕。${permissionHelpText()}`,
+      }
+      render('patch')
+      return
     }
-    settleSpeechResult('native', result)
-  } catch (err) {
-    if (state.engine !== 'native') return
+
+    // Even if permission flow timed out / still "prompt", try starting —
+    // iOS may show the speech dialog on plugin.start().
+    const session = createNativeSpeechSession()
+    let done
+    try {
+      done = session.start({
+        onPartial: (preview) => {
+          if (!preview) return
+          state.heard = preview
+          render('patch')
+        },
+      })
+    } catch {
+      state.micStarting = false
+      state.listening = false
+      state.micBusy = false
+      state.engine = null
+      state.feedback = {
+        type: 'warn',
+        message: 'App 語音辨識啟動失敗，請重試或用下方打字。',
+      }
+      render('patch')
+      return
+    }
+
+    state.webSpeech = session
+    state.webSpeechDone = done
+    state.engine = 'native'
+    state.listening = true
     state.micStarting = false
-    state.listening = false
     state.micBusy = false
-    state.webSpeech = null
-    state.webSpeechDone = null
-    state.engine = null
-    const denied = err?.name === 'NotAllowedError' || err?.message === 'not-allowed'
+    if (!state.awaitingRetry) state.heard = ''
     state.feedback = {
-      type: 'warn',
-      message: denied
-        ? `沒有麥克風或語音辨識權限。${permissionHelpText()}`
-        : 'App 語音辨識啟動失敗，請重試或用下方打字。',
+      type: 'info',
+      message: '請現在說英文…說完會自動辨識，或點「我說完了」。',
     }
     render('patch')
+
+    const watch = sleep(10000).then(() => ({
+      text: state.heard || '',
+      errorCode: 'timeout',
+      stopRequested: true,
+    }))
+
+    try {
+      const result = await Promise.race([done, watch])
+      if (state.engine === 'native') {
+        try {
+          await session.stop?.()
+        } catch {
+          // ignore
+        }
+      }
+      settleSpeechResult('native', result)
+    } catch (err) {
+      if (state.engine !== 'native') return
+      state.micStarting = false
+      state.listening = false
+      state.micBusy = false
+      state.webSpeech = null
+      state.webSpeechDone = null
+      state.engine = null
+      const denied = err?.name === 'NotAllowedError' || err?.message === 'not-allowed'
+      state.feedback = {
+        type: 'warn',
+        message: denied
+          ? `沒有語音辨識權限。${permissionHelpText()}`
+          : 'App 語音辨識啟動失敗，請重試或用下方打字。',
+      }
+      render('patch')
+    }
+  } finally {
+    window.clearTimeout(startWatchdog)
+    if (state.micStarting) {
+      state.micStarting = false
+      render('patch')
+    }
   }
 }
 
