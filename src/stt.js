@@ -169,7 +169,7 @@ async function blobToMono16k(blob) {
  * One-shot push-to-talk recorder.
  * start() begins capture; stop() returns a Blob.
  */
-export function createRecorder() {
+export function createRecorder({ timeoutMs = 5000 } = {}) {
   let mediaStream = null
   let recorder = null
   let chunks = []
@@ -177,14 +177,23 @@ export function createRecorder() {
 
   async function start() {
     chunks = []
-    mediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
-      video: false,
+    // Keep constraints minimal — fancy constraints hang more often on iOS WKWebView.
+    const gum = navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+    const timed = new Promise((_, reject) => {
+      window.setTimeout(() => reject(new Error('getUserMedia-timeout')), timeoutMs)
     })
+    mediaStream = await Promise.race([gum, timed])
+    // If timed out, still try to stop a late stream.
+    void gum.then((late) => {
+      if (late && late !== mediaStream) {
+        try {
+          late.getTracks().forEach((t) => t.stop())
+        } catch {
+          // ignore
+        }
+      }
+    }).catch(() => {})
+
     const mime = pickRecorderMime()
     recorder = mime ? new MediaRecorder(mediaStream, { mimeType: mime }) : new MediaRecorder(mediaStream)
     recorder.ondataavailable = (event) => {

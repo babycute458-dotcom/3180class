@@ -9,13 +9,5 @@
   "ios": {
     "contentInset": "automatic",
     "preferredContentMode": "mobile"
-  },
-  "plugins": {
-    "SpeechRecognition": {
-      "permissions": {
-        "speechRecognition": "對練需要語音辨識，才能聽你說的英文並糾正。",
-        "microphone": "對練需要使用麥克風，才能練習說英文。"
-      }
-    }
   }
 }

@@ -10,12 +10,7 @@ import {
   loadSttEngine,
   transcribeBlob,
 } from './stt.js'
-import {
-  createNativeSpeechSession,
-  ensureNativeSpeechPermission,
-  isNativeApp,
-  nativePlatformLabel,
-} from './nativeSpeech.js'
+import { isNativeApp, nativePlatformLabel, releaseAudioSession } from './nativeSpeech.js'
 
 const state = {
   view: 'home',
@@ -36,15 +31,14 @@ const state = {
   recorder: null,
   webSpeech: null,
   webSpeechDone: null,
-  engine: null, // 'webspeech' | 'whisper' | 'native'
+  engine: null, // 'webspeech' | 'whisper'
   sttReady: false,
   sttLoading: false,
   emptyListenCount: 0,
-  nativePerm: null, // { ok, status, detail } | null
 }
 
 const app = document.querySelector('#app')
-const APP_VERSION = 'v22'
+const APP_VERSION = 'v23'
 const TTS_LANG = 'zh-TW'
 const TTS_RELEASE_MS = 0
 
@@ -161,10 +155,13 @@ function speakChinese(text) {
     state.feedback = {
       type: ok ? 'info' : 'warn',
       message: ok
-        ? '讀完了。點「說英文」開始說，說完稍等會自動辨識。'
+        ? '讀完了。稍等半秒再點「說英文」，說完點「我說完了」。'
         : '中文朗讀失敗，請看螢幕文字，再點「說英文」。',
     }
     render('patch')
+    if (ok && isNativeApp()) {
+      void releaseAudioSession()
+    }
   }
 
   utter.onend = () => finish(true)
@@ -204,20 +201,13 @@ async function ensureStt() {
   state.sttLoading = false
 }
 
-function permissionHelpText() {
-  return (
-    '請到「設定 → 隱私權與安全性 → 語音辨識」開啟對練；麥克風也要保持開啟。' +
-    '若沒有「語音辨識」項目，請刪除 App 重裝後再點「說英文」，並在彈窗點允許。'
-  )
-}
-
 function noteEmptyListen(message) {
   state.emptyListenCount += 1
   let tip = message
   if (state.emptyListenCount >= 2) {
     tip += isNativeApp()
-      ? ` ${permissionHelpText()}`
-      : ' 若一直不行：請用 App 版（非瀏覽器），並允許麥克風。'
+      ? ' 也可直接在下方打字提交。請確認「設定 → 對練 → 麥克風」已開啟；說英文前先等中文讀完。'
+      : ' 若一直不行：請允許麥克風，或改用下方打字。'
   }
   state.feedback = { type: 'warn', message: tip }
   render('patch')
@@ -238,11 +228,7 @@ function settleSpeechResult(expectedEngine, result) {
     return
   }
   if (result?.errorCode === 'not-allowed') {
-    noteEmptyListen(`沒有麥克風或語音辨識權限。${permissionHelpText()}`)
-    return
-  }
-  if (result?.errorCode === 'permission-pending') {
-    noteEmptyListen(`請先在系統彈窗點「允許」。${permissionHelpText()}`)
+    noteEmptyListen('請允許麥克風權限後再試，或用下方打字。')
     return
   }
   if (result?.errorCode === 'aborted') {
@@ -255,11 +241,7 @@ function settleSpeechResult(expectedEngine, result) {
     return
   }
   if (result?.errorCode === 'timeout') {
-    noteEmptyListen('辨識逾時，請再點「說英文」後馬上開口，說完再點「我說完了」。')
-    return
-  }
-  if (result?.errorCode === 'start-failed' || result?.errorCode === 'native-speech-unavailable') {
-    noteEmptyListen('語音辨識無法啟動，請重試或用下方打字。')
+    noteEmptyListen('辨識逾時，請再點「說英文」，說完再點「我說完了」。')
     return
   }
   noteEmptyListen('沒聽清英文，請再點「說英文」大聲說清楚，或用下方打字。')
@@ -269,131 +251,67 @@ function handleWebSpeechResult(result) {
   settleSpeechResult('webspeech', result)
 }
 
-async function startNativeSpeechListening() {
-  // Never leave the button stuck on「準備中」— hard cap the whole start path.
-  const startWatchdog = window.setTimeout(() => {
-    if (!state.micStarting) return
+/**
+ * iOS App path: push-to-talk MediaRecorder + Whisper.
+ * Skips SFSpeechRecognizer entirely (it kept hanging on sideloaded builds).
+ * getUserMedia must start in the same turn as the tap — no awaits before it.
+ */
+function startNativeWhisperListening() {
+  if (!canRecordAudio()) {
     state.micStarting = false
-    state.listening = false
-    state.micBusy = false
-    state.engine = null
     state.feedback = {
       type: 'warn',
-      message: `啟動逾時。${permissionHelpText()}也可先用下方打字。`,
+      message: '此裝置無法錄音，請用下方打字提交。',
     }
     render('patch')
-  }, 18000)
+    return
+  }
 
-  try {
-    state.feedback = {
-      type: 'info',
-      message: '正在準備麥克風…',
-    }
-    render('patch')
+  void releaseAudioSession()
 
-    const perm = await ensureNativeSpeechPermission((step) => {
-      const messages = {
-        mic: '正在準備麥克風…',
-        plugin: '正在載入語音辨識…',
-        speech: '請在系統彈窗點「允許」（語音辨識）…',
-      }
-      state.feedback = { type: 'info', message: messages[step] || '準備中…' }
-      state.nativePerm = { ok: false, status: 'pending', detail: step }
-      render('patch')
+  const recorder = createRecorder({ timeoutMs: 4000 })
+  // Start getUserMedia immediately (user-gesture).
+  const started = recorder.start()
+
+  state.recorder = recorder
+  state.engine = 'whisper'
+  state.listening = true
+  state.micStarting = false
+  state.micBusy = false
+  if (!state.awaitingRetry) state.heard = ''
+  state.feedback = {
+    type: 'info',
+    message: '正在錄音…請說英文，說完點「我說完了」。首次需下載語音模型。',
+  }
+  render('patch')
+
+  void started
+    .then(() => {
+      void ensureStt().catch(() => {})
     })
-    state.nativePerm = perm
-
-    if (!perm.ok && (perm.status === 'denied' || perm.detail?.includes('denied'))) {
-      state.micStarting = false
-      state.listening = false
-      state.micBusy = false
+    .catch((err) => {
+      state.recorder = null
       state.engine = null
-      state.feedback = {
-        type: 'warn',
-        message: `權限被拒絕。${permissionHelpText()}`,
-      }
-      render('patch')
-      return
-    }
-
-    // Even if permission flow timed out / still "prompt", try starting —
-    // iOS may show the speech dialog on plugin.start().
-    const session = createNativeSpeechSession()
-    let done
-    try {
-      done = session.start({
-        onPartial: (preview) => {
-          if (!preview) return
-          state.heard = preview
-          render('patch')
-        },
-      })
-    } catch {
-      state.micStarting = false
       state.listening = false
-      state.micBusy = false
-      state.engine = null
-      state.feedback = {
-        type: 'warn',
-        message: 'App 語音辨識啟動失敗，請重試或用下方打字。',
-      }
-      render('patch')
-      return
-    }
-
-    state.webSpeech = session
-    state.webSpeechDone = done
-    state.engine = 'native'
-    state.listening = true
-    state.micStarting = false
-    state.micBusy = false
-    if (!state.awaitingRetry) state.heard = ''
-    state.feedback = {
-      type: 'info',
-      message: '請現在說英文…說完會自動辨識，或點「我說完了」。',
-    }
-    render('patch')
-
-    const watch = sleep(10000).then(() => ({
-      text: state.heard || '',
-      errorCode: 'timeout',
-      stopRequested: true,
-    }))
-
-    try {
-      const result = await Promise.race([done, watch])
-      if (state.engine === 'native') {
-        try {
-          await session.stop?.()
-        } catch {
-          // ignore
-        }
-      }
-      settleSpeechResult('native', result)
-    } catch (err) {
-      if (state.engine !== 'native') return
       state.micStarting = false
-      state.listening = false
       state.micBusy = false
-      state.webSpeech = null
-      state.webSpeechDone = null
-      state.engine = null
-      const denied = err?.name === 'NotAllowedError' || err?.message === 'not-allowed'
+      const denied = err?.name === 'NotAllowedError' || err?.name === 'SecurityError'
+      const timeout = err?.message === 'getUserMedia-timeout'
       state.feedback = {
         type: 'warn',
         message: denied
-          ? `沒有語音辨識權限。${permissionHelpText()}`
-          : 'App 語音辨識啟動失敗，請重試或用下方打字。',
+          ? '請允許麥克風權限後再試，或用下方打字。'
+          : timeout
+            ? '麥克風開啟逾時。請先等中文讀完再點「說英文」，或直接打字。'
+            : '無法打開麥克風，請重試或用下方打字。',
       }
       render('patch')
-    }
-  } finally {
-    window.clearTimeout(startWatchdog)
-    if (state.micStarting) {
-      state.micStarting = false
-      render('patch')
-    }
-  }
+      try {
+        recorder.cancel()
+      } catch {
+        // ignore
+      }
+    })
 }
 
 function startWebSpeechListening() {
@@ -437,7 +355,7 @@ async function startWhisperListening() {
     throw new Error('recorder-unavailable')
   }
   // Invoke getUserMedia in this turn BEFORE loading the model (iOS gesture).
-  const recorder = createRecorder()
+  const recorder = createRecorder({ timeoutMs: 5000 })
   const started = recorder.start()
   state.recorder = recorder
   state.engine = 'whisper'
@@ -462,8 +380,9 @@ function startListening() {
   render('patch')
 
   try {
+    // Capacitor iOS App: MediaRecorder + Whisper only (no SFSpeechRecognizer).
     if (isNativeApp()) {
-      void startNativeSpeechListening()
+      startNativeWhisperListening()
       return
     }
     if (canUseWebSpeech()) {
@@ -482,11 +401,14 @@ function startListening() {
     state.webSpeech = null
     state.engine = null
     const denied = err?.name === 'NotAllowedError' || err?.name === 'SecurityError'
+    const timeout = err?.message === 'getUserMedia-timeout'
     state.feedback = {
       type: 'warn',
       message: denied
         ? '請允許麥克風權限後再試。'
-        : '無法打開麥克風，請檢查權限後重試，或用下方打字。',
+        : timeout
+          ? '麥克風開啟逾時，請重試或用下方打字。'
+          : '無法打開麥克風，請檢查權限後重試，或用下方打字。',
     }
     render('patch')
   })
@@ -635,8 +557,14 @@ function unlockSpeech() {
 
 function startPractice() {
   unlockSpeech()
-  // Only preload Whisper when Web Speech is unavailable.
-  if (!canUseWebSpeech()) {
+  // Native iOS App always uses Whisper; also preload when Web Speech is missing.
+  if (isNativeApp() || !canUseWebSpeech()) {
+    state.feedback = {
+      type: 'info',
+      message: isNativeApp()
+        ? '正在準備語音模型（首次約需下載 40MB）…'
+        : null,
+    }
     void ensureStt().catch(() => {})
   }
   rebuildPool()
@@ -781,14 +709,10 @@ function renderPractice() {
             <button class="btn btn-primary" data-action="submit-typed" type="button">提交</button>
           </div>
         </div>
-        <p class="hint">手機 App：點「說英文」後，先在系統彈窗點「允許」，再馬上開口；說完稍等或點「我說完了」。答案請說英文。</p>
+        <p class="hint">手機 App：等中文讀完 → 點「說英文」並立刻開口 → 再說一次點「我說完了」。不行就打字。答案請說英文。</p>
         ${
           isNativeApp()
-            ? `<p class="hint debug-perm">系統：${escapeHtml(nativePlatformLabel())}${
-                state.nativePerm
-                  ? ` · 權限 ${escapeHtml(String(state.nativePerm.status))}/${escapeHtml(String(state.nativePerm.detail))}`
-                  : ' · 權限尚未請求'
-              }</p>`
+            ? `<p class="hint debug-perm">系統：${escapeHtml(nativePlatformLabel())} · 錄音模式 Whisper</p>`
             : ''
         }
       </section>
