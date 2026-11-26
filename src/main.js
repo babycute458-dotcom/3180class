@@ -38,7 +38,8 @@ const state = {
 }
 
 const app = document.querySelector('#app')
-const APP_VERSION = 'v18'
+const APP_VERSION = 'v19'
+const TTS_LANG = 'zh-TW'
 const TTS_RELEASE_MS = 0
 
 function normalize(text) {
@@ -68,10 +69,12 @@ function pickRandom(excludeId) {
 
 function pickChineseVoice() {
   const voices = window.speechSynthesis?.getVoices?.() || []
+  const lower = (v) => String(v.lang || '').toLowerCase().replace('_', '-')
   return (
-    voices.find((v) => v.lang === 'zh-CN') ||
-    voices.find((v) => v.lang === 'zh_CN') ||
-    voices.find((v) => v.lang?.toLowerCase().startsWith('zh')) ||
+    voices.find((v) => lower(v) === 'zh-tw') ||
+    voices.find((v) => lower(v) === 'zh-hant-tw') ||
+    voices.find((v) => /zh-.*(tw|hant)/.test(lower(v))) ||
+    voices.find((v) => lower(v).startsWith('zh')) ||
     null
   )
 }
@@ -122,7 +125,7 @@ function speakChinese(text) {
   cancelRecording()
 
   if (!window.speechSynthesis) {
-    state.feedback = { type: 'warn', message: '这个浏览器不支持中文朗读，请看屏幕上的中文。' }
+    state.feedback = { type: 'warn', message: '這個瀏覽器不支援中文朗讀，請看螢幕上的中文。' }
     render('patch')
     return
   }
@@ -136,14 +139,14 @@ function speakChinese(text) {
   }
 
   const utter = new SpeechSynthesisUtterance(text)
-  utter.lang = 'zh-CN'
+  utter.lang = TTS_LANG
   const zh = pickChineseVoice()
   if (zh) utter.voice = zh
   utter.rate = 0.92
   utter.pitch = 1
 
   state.speaking = true
-  state.feedback = { type: 'info', message: '正在读中文…' }
+  state.feedback = { type: 'info', message: '正在讀中文…' }
   render('patch')
 
   const finish = (ok) => {
@@ -152,8 +155,8 @@ function speakChinese(text) {
     state.feedback = {
       type: ok ? 'info' : 'warn',
       message: ok
-        ? '读完了。点「说英文」开始说，说完再点「我说完了」。'
-        : '中文朗读失败，请看屏幕文字，再点「说英文」。',
+        ? '讀完了。點「說英文」開始說，說完稍等會自動辨識。'
+        : '中文朗讀失敗，請看螢幕文字，再點「說英文」。',
     }
     render('patch')
   }
@@ -199,16 +202,17 @@ function noteEmptyListen(message) {
   state.emptyListenCount += 1
   let tip = message
   if (state.emptyListenCount >= 2 && isAppleMobile()) {
-    tip += ' 若一直不行：请用 Safari 打开本页，并允许麦克风。'
+    tip += ' 若一直不行：請到「設定 → 對練」確認麥克風／語音辨識已開啟。'
   }
   state.feedback = { type: 'warn', message: tip }
   render('patch')
 }
 
-function handleWebSpeechResult(result) {
-  if (state.engine !== 'webspeech') return
+function settleSpeechResult(expectedEngine, result) {
+  if (state.engine !== expectedEngine) return
   state.listening = false
   state.micBusy = false
+  state.micStarting = false
   state.webSpeech = null
   state.webSpeechDone = null
   state.engine = null
@@ -219,14 +223,27 @@ function handleWebSpeechResult(result) {
     return
   }
   if (result?.errorCode === 'not-allowed') {
-    noteEmptyListen('请允许麦克风权限后再试。')
+    noteEmptyListen('請允許麥克風／語音辨識權限後再試。')
+    return
+  }
+  if (result?.errorCode === 'aborted') {
+    state.feedback = { type: 'warn', message: '已取消，可再點「說英文」。' }
+    render('patch')
     return
   }
   if (result?.errorCode === 'no-speech') {
-    noteEmptyListen('没听到声音，请再点「说英文」后马上开口。')
+    noteEmptyListen('沒聽到聲音，請再點「說英文」後馬上開口。')
     return
   }
-  noteEmptyListen('没听清英文，请再点「说英文」大声说清楚，或用下方打字。')
+  if (result?.errorCode === 'timeout') {
+    noteEmptyListen('辨識逾時，請再點「說英文」大聲說清楚，或用下方打字。')
+    return
+  }
+  noteEmptyListen('沒聽清英文，請再點「說英文」大聲說清楚，或用下方打字。')
+}
+
+function handleWebSpeechResult(result) {
+  settleSpeechResult('webspeech', result)
 }
 
 async function startNativeSpeechListening() {
@@ -244,41 +261,26 @@ async function startNativeSpeechListening() {
     state.engine = 'native'
     state.listening = true
     state.micStarting = false
+    state.micBusy = false
     if (!state.awaitingRetry) state.heard = ''
-    state.feedback = { type: 'info', message: '请现在说英文…说完稍等，App 会自动识别。' }
+    state.feedback = { type: 'info', message: '請現在說英文…說完稍等，App 會自動辨識。' }
     render('patch')
     const result = await done
-    if (state.engine !== 'native') return
+    // finishListening / cancel may have already settled this session.
+    settleSpeechResult('native', result)
+  } catch (err) {
+    state.micStarting = false
     state.listening = false
     state.micBusy = false
     state.webSpeech = null
     state.webSpeechDone = null
     state.engine = null
-    const textHeard = String(result?.text || '').trim()
-    if (textHeard) {
-      state.emptyListenCount = 0
-      evaluateAnswer(textHeard)
-      return
-    }
-    if (result?.errorCode === 'not-allowed') {
-      noteEmptyListen('请允许麦克风 / 语音识别权限。')
-      return
-    }
-    if (result?.errorCode === 'aborted') {
-      noteEmptyListen('已取消。')
-      return
-    }
-    noteEmptyListen('没听清英文，请再点「说英文」大声说清楚，或用下方打字。')
-  } catch (err) {
-    state.micStarting = false
-    state.listening = false
-    state.engine = null
     const denied = err?.name === 'NotAllowedError' || err?.message === 'not-allowed'
     state.feedback = {
       type: 'warn',
       message: denied
-        ? '请允许麦克风 / 语音识别权限后再试。'
-        : 'App 语音识别启动失败，请重试或用下方打字。',
+        ? '請允許麥克風／語音辨識權限後再試。'
+        : 'App 語音辨識啟動失敗，請重試或用下方打字。',
     }
     render('patch')
   }
@@ -306,8 +308,8 @@ function startWebSpeechListening() {
   state.feedback = {
     type: 'info',
     message: continuous
-      ? '正在听…说完后点「我说完了」。'
-      : '请现在说英文…说完稍等，会自动识别。',
+      ? '正在聽…說完後點「我說完了」。'
+      : '請現在說英文…說完稍等，會自動辨識。',
   }
   render('patch')
 
@@ -332,7 +334,7 @@ async function startWhisperListening() {
   state.listening = true
   state.micStarting = false
   if (!state.awaitingRetry) state.heard = ''
-  state.feedback = { type: 'info', message: '正在听…说完后点「我说完了」。' }
+  state.feedback = { type: 'info', message: '正在聽…說完後點「我說完了」。' }
   render('patch')
   await started
   // Warm model while user speaks.
@@ -346,7 +348,7 @@ function startListening() {
   // any await before that breaks iPhone mic permission / speech start.
   stopSpeaking()
   state.micStarting = true
-  state.feedback = { type: 'info', message: '正在打开麦克风…' }
+  state.feedback = { type: 'info', message: '正在打開麥克風…' }
   render('patch')
 
   try {
@@ -365,6 +367,7 @@ function startListening() {
   void startWhisperListening().catch((err) => {
     state.micStarting = false
     state.listening = false
+    state.micBusy = false
     state.recorder = null
     state.webSpeech = null
     state.engine = null
@@ -372,11 +375,34 @@ function startListening() {
     state.feedback = {
       type: 'warn',
       message: denied
-        ? '请允许麦克风权限后再试。'
-        : '无法打开麦克风，请检查权限后重试，或用下方打字。',
+        ? '請允許麥克風權限後再試。'
+        : '無法打開麥克風，請檢查權限後重試，或用下方打字。',
     }
     render('patch')
   })
+}
+
+async function cancelActiveListen() {
+  const session = state.webSpeech
+  // Clear engine first so the session's auto-settle path no-ops.
+  state.listening = false
+  state.micBusy = false
+  state.micStarting = false
+  state.webSpeech = null
+  state.webSpeechDone = null
+  state.engine = null
+  try {
+    await session?.cancel?.()
+  } catch {
+    try {
+      state.recorder?.cancel?.()
+    } catch {
+      // ignore
+    }
+    state.recorder = null
+  }
+  state.feedback = { type: 'warn', message: '已取消，可再點「說英文」。' }
+  render('patch')
 }
 
 async function finishListening() {
@@ -385,25 +411,25 @@ async function finishListening() {
   const engine = state.engine
   state.listening = false
   state.micBusy = true
-  state.feedback = { type: 'info', message: '正在识别英文…' }
+  state.feedback = { type: 'info', message: '正在辨識英文…' }
   render('patch')
 
   if ((engine === 'webspeech' || engine === 'native') && state.webSpeech) {
     const session = state.webSpeech
     const done = state.webSpeechDone
     try {
-      session.stop()
+      void session.stop?.()
       const result = await Promise.race([
-        done,
-        sleep(4000).then(() => ({ text: '', errorCode: 'timeout', stopRequested: true })),
+        done || Promise.resolve({ text: '', errorCode: 'timeout', stopRequested: true }),
+        sleep(5000).then(() => ({ text: state.heard || '', errorCode: 'timeout', stopRequested: true })),
       ])
-      handleWebSpeechResult(result)
+      settleSpeechResult(engine, result)
     } catch {
       state.micBusy = false
       state.engine = null
       state.webSpeech = null
       state.webSpeechDone = null
-      noteEmptyListen('识别失败，请再试一次，或用下方打字。')
+      noteEmptyListen('辨識失敗，請再試一次，或用下方打字。')
     }
     return
   }
@@ -421,14 +447,14 @@ async function finishListening() {
     const { blob, durationMs } = await recorder.stop()
     if (durationMs < 450 || !blob || blob.size < 120) {
       state.micBusy = false
-      noteEmptyListen('时间太短或没有声音，请再点「说英文」。')
+      noteEmptyListen('時間太短或沒有聲音，請再點「說英文」。')
       return
     }
 
     const text = await transcribeBlob(blob, onSttStatus)
     state.micBusy = false
     if (!text) {
-      noteEmptyListen('没听清英文，请再说一次，或用下方打字。')
+      noteEmptyListen('沒聽清英文，請再說一次，或用下方打字。')
       return
     }
     state.emptyListenCount = 0
@@ -436,11 +462,11 @@ async function finishListening() {
   } catch (err) {
     state.micBusy = false
     if (err?.message === 'silent-audio') {
-      noteEmptyListen('麦克风好像没录到声音。请允许麦克风权限，或改用 Safari 打开后再试。')
+      noteEmptyListen('麥克風好像沒錄到聲音。請允許麥克風權限後再試。')
     } else if (err?.message === 'empty-audio') {
-      noteEmptyListen('没录到声音，请再点「说英文」。')
+      noteEmptyListen('沒錄到聲音，請再點「說英文」。')
     } else {
-      noteEmptyListen('识别失败，请再试一次，或用下方打字提交。')
+      noteEmptyListen('辨識失敗，請再試一次，或用下方打字提交。')
     }
   }
 }
@@ -459,7 +485,7 @@ function evaluateAnswer(heard) {
     const exact = normalize(heard) === normalize(expected)
     state.feedback = {
       type: 'good',
-      message: exact ? '正确！' : '意思对了，通过！',
+      message: exact ? '正確！' : '意思對了，通過！',
     }
     render('patch')
     window.setTimeout(() => {
@@ -469,10 +495,10 @@ function evaluateAnswer(heard) {
   }
 
   state.awaitingRetry = true
-  const tip = alts.length ? `也可以说：${alts.slice(0, 2).join(' / ')}` : ''
+  const tip = alts.length ? `也可以說：${alts.slice(0, 2).join(' / ')}` : ''
   state.feedback = {
     type: 'bad',
-    message: tip ? `不太对，请再点「说英文」：（${tip}）` : '不太对，请再点「说英文」：',
+    message: tip ? `不太對，請再點「說英文」：（${tip}）` : '不太對，請再點「說英文」：',
     answer: expected,
   }
   render('patch')
@@ -488,7 +514,7 @@ function nextSentence(fromCorrect = false) {
   clearTypedInput()
   const next = pickRandom(state.current?.id)
   if (!next) {
-    state.feedback = { type: 'warn', message: '请至少选择一个题库。' }
+    state.feedback = { type: 'warn', message: '請至少選擇一個題庫。' }
     render('full')
     return
   }
@@ -498,8 +524,8 @@ function nextSentence(fromCorrect = false) {
   state.feedback = {
     type: 'info',
     message: fromCorrect
-      ? '下一题：先点「听中文」，再说英文'
-      : '先点「听中文」，再点「说英文」；说完点「我说完了」',
+      ? '下一題：先點「聽中文」，再說英文'
+      : '先點「聽中文」，再點「說英文」；說完稍等會自動辨識',
   }
   render('full')
 }
@@ -509,7 +535,7 @@ function unlockSpeech() {
   try {
     window.speechSynthesis.getVoices()
     const warm = new SpeechSynthesisUtterance('。')
-    warm.lang = 'zh-CN'
+    warm.lang = TTS_LANG
     warm.volume = 0
     const zh = pickChineseVoice()
     if (zh) warm.voice = zh
@@ -567,16 +593,16 @@ function renderHome() {
   return `
     <div class="shell">
       <section class="hero">
-        <h1 class="brand"><span>Speak Chinese → Answer English</span>对练</h1>
-        <p class="lede">机器读中文，你讲英文。说错会纠正，说对就随机出下一题。已收录你笔记本里的 ${total} 句。</p>
+        <h1 class="brand"><span>Speak Chinese → Answer English</span>對練</h1>
+        <p class="lede">機器讀中文（台灣），你講英文。說錯會糾正，說對就隨機出下一題。已收錄你筆記本裡的 ${total} 句。</p>
         ${
           showInstall
             ? `<div class="install-card">
-                <strong>没有 Mac 也能装 App（不上架）</strong>
-                <p>用 Windows + Sideloadly 安装真正的 iPhone App（系统麦克风）。完整步骤见仓库 <b>APP-INSTALL.md</b>。</p>
+                <strong>沒有 Mac 也能裝 App（不上架）</strong>
+                <p>用 Windows + Sideloadly 安裝真正的 iPhone App（系統麥克風）。完整步驟見倉庫 <b>APP-INSTALL.md</b>。</p>
                 <ol>
-                  <li>今天可先在 Windows 笔记本用 Chrome 打开本页练习</li>
-                  <li>再到 GitHub Actions 下载 IPA，用 Sideloadly 装到 iPhone</li>
+                  <li>今天可先在 Windows 筆電用 Chrome 打開本頁練習</li>
+                  <li>再到 GitHub Actions 下載 IPA，用 Sideloadly 裝到 iPhone</li>
                 </ol>
               </div>`
             : ''
@@ -592,12 +618,12 @@ function renderHome() {
           ).join('')}
         </div>
         <div class="cta-row">
-          <button class="btn btn-primary" data-action="start" type="button">开始练习（${selectedCount} 句）</button>
+          <button class="btn btn-primary" data-action="start" type="button">開始練習（${selectedCount} 句）</button>
         </div>
         ${
           !canRecordAudio() && !canUseWebSpeech()
-            ? `<div class="unsupported">当前浏览器可能无法录音。建议使用 Safari / Chrome；也可以在练习页用键盘输入。</div>`
-            : `<p class="hint">提示：先点「听中文」，再点「说英文」。手机请用 Safari 并允许麦克风；也可加入主画面当 App 用。</p>`
+            ? `<div class="unsupported">目前瀏覽器可能無法錄音。建議使用 Safari / Chrome；也可以在練習頁用鍵盤輸入。</div>`
+            : `<p class="hint">提示：先點「聽中文」，再點「說英文」。App 版會用系統語音辨識；練習仍是說英文答案。</p>`
         }
       </section>
     </div>
@@ -607,26 +633,28 @@ function renderHome() {
 function statusPill() {
   const fb = state.feedback
   if (fb?.type === 'good') return { className: 'pill good', text: fb.message }
-  if (fb?.type === 'bad') return { className: 'pill bad', text: '需要纠正' }
+  if (fb?.type === 'bad') return { className: 'pill bad', text: '需要糾正' }
   if (fb?.type === 'warn') return { className: 'pill warn', text: fb.message }
-  if (state.micBusy) return { className: 'pill warn', text: '正在识别…' }
-  if (state.listening) return { className: 'pill warn', text: '正在听…' }
-  if (state.speaking) return { className: 'pill', text: '正在读中文…' }
+  if (state.micBusy) return { className: 'pill warn', text: '正在辨識…' }
+  if (state.listening) return { className: 'pill warn', text: '正在聽…' }
+  if (state.speaking) return { className: 'pill', text: '正在讀中文…' }
   if (fb?.message) return { className: 'pill', text: fb.message }
-  return { className: 'pill', text: '先点「听中文」' }
+  return { className: 'pill', text: '先點「聽中文」' }
+}
+
+function isOneShotListen() {
+  return state.engine === 'native' || (isAppleMobile() && state.engine === 'webspeech')
 }
 
 function micLabel() {
-  if (state.micStarting) return '准备中…'
-  if (state.micBusy) return '识别中…'
+  if (state.micStarting) return '準備中…'
+  if (state.micBusy) return '辨識中…'
   if (state.listening) {
-    // iPhone one-shot auto-ends; desktop uses manual 「我说完了」.
-    return state.engine === 'native' || (isAppleMobile() && state.engine === 'webspeech')
-      ? '听写中…点此取消'
-      : '我说完了'
+    // iPhone / native one-shot auto-ends; desktop uses manual 「我說完了」.
+    return isOneShotListen() ? '聽寫中…點此取消' : '我說完了'
   }
-  if (state.awaitingRetry) return '再讲一次'
-  return '说英文'
+  if (state.awaitingRetry) return '再講一次'
+  return '說英文'
 }
 
 function renderPractice() {
@@ -637,18 +665,18 @@ function renderPractice() {
   return `
     <div class="shell" data-practice="1">
       <div class="topbar">
-        <h1>对练 <small class="ver">${APP_VERSION}</small></h1>
+        <h1>對練 <small class="ver">${APP_VERSION}</small></h1>
         <div class="stats">
-          <span>答对 <b data-el="correct">${state.correctCount}</b></span>
+          <span>答對 <b data-el="correct">${state.correctCount}</b></span>
           <span>作答 <b data-el="attempts">${state.attemptCount}</b></span>
           <button class="btn btn-ghost" data-action="home" type="button">返回</button>
         </div>
       </div>
       <section class="stage">
-        <p class="prompt-label">中文提示</p>
+        <p class="prompt-label">中文提示（台灣）</p>
         <h2 class="prompt-zh" data-el="zh">${escapeHtml(s?.zh || '')}</h2>
         <div class="status-row" data-el="status"><span class="${pill.className}">${escapeHtml(pill.text)}</span></div>
-        <p class="heard">你说的：<strong data-el="heard">${escapeHtml(state.heard || '—')}</strong></p>
+        <p class="heard">你說的：<strong data-el="heard">${escapeHtml(state.heard || '—')}</strong></p>
         <div class="correction-slot" data-el="correction">
           ${
             fb?.type === 'bad'
@@ -657,11 +685,11 @@ function renderPractice() {
           }
         </div>
         <div class="actions">
-          <button class="btn btn-ghost" data-action="replay" type="button" data-el="zh-btn">听中文</button>
+          <button class="btn btn-ghost" data-action="replay" type="button" data-el="zh-btn">聽中文</button>
           <button class="btn btn-mic ${state.listening ? 'listening' : ''}" data-action="mic" type="button" data-el="mic">
             ${micLabel()}
           </button>
-          <button class="btn btn-ghost" data-action="skip" type="button">跳过 / 下一题</button>
+          <button class="btn btn-ghost" data-action="skip" type="button">跳過 / 下一題</button>
         </div>
         <div class="manual">
           <label for="typed">也可以打字提交</label>
@@ -670,7 +698,7 @@ function renderPractice() {
             <button class="btn btn-primary" data-action="submit-typed" type="button">提交</button>
           </div>
         </div>
-        <p class="hint">手机：点「说英文」后马上开口，说完稍等会自动识别。电脑：说完再点「我说完了」。请用 Safari / Chrome，并允许麦克风。</p>
+        <p class="hint">手機 App：點「說英文」後馬上開口，說完稍等會自動辨識。聽寫中可點按鈕取消。答案請說英文。</p>
       </section>
     </div>
   `
@@ -762,8 +790,13 @@ app.addEventListener('click', (event) => {
   }
   if (action === 'mic') {
     if (state.micBusy || state.micStarting) return
-    if (state.listening) void finishListening()
-    else void startListening()
+    if (state.listening) {
+      // One-shot (native / iPhone): button means cancel, not 「finish」.
+      if (isOneShotListen()) void cancelActiveListen()
+      else void finishListening()
+    } else {
+      void startListening()
+    }
   }
   if (action === 'skip') nextSentence(false)
   if (action === 'submit-typed') {

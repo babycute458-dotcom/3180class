@@ -1,6 +1,6 @@
 {
   "appId": "com.babycute.duilian",
-  "appName": "对练",
+  "appName": "對練",
   "webDir": "dist",
   "bundledWebRuntime": false,
   "server": {
@@ -13,8 +13,8 @@
   "plugins": {
     "SpeechRecognition": {
       "permissions": {
-        "speechRecognition": "对练需要语音识别，才能听你说的英文并纠正。",
-        "microphone": "对练需要使用麦克风，才能练习说英文。"
+        "speechRecognition": "對練需要語音辨識，才能聽你說的英文並糾正。",
+        "microphone": "對練需要使用麥克風，才能練習說英文。"
       }
     }
   }

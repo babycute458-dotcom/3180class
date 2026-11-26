@@ -39,10 +39,10 @@ jobs:
       - name: Patch Info.plist privacy strings
         run: |
           PLIST="ios/App/App/Info.plist"
-          /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 对练需要使用麦克风，才能练习说英文。" "$PLIST" 2>/dev/null || \
-            /usr/libexec/PlistBuddy -c "Set :NSMicrophoneUsageDescription 对练需要使用麦克风，才能练习说英文。" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Add :NSSpeechRecognitionUsageDescription string 对练需要语音识别，才能听你说的英文并纠正。" "$PLIST" 2>/dev/null || \
-            /usr/libexec/PlistBuddy -c "Set :NSSpeechRecognitionUsageDescription 对练需要语音识别，才能听你说的英文并纠正。" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 對練需要使用麥克風，才能練習說英文。" "$PLIST" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :NSMicrophoneUsageDescription 對練需要使用麥克風，才能練習說英文。" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :NSSpeechRecognitionUsageDescription string 對練需要語音辨識，才能聽你說的英文並糾正。" "$PLIST" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :NSSpeechRecognitionUsageDescription 對練需要語音辨識，才能聽你說的英文並糾正。" "$PLIST"
 
       - name: Build unsigned iOS app
         run: |

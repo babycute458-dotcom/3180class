@@ -270,7 +270,7 @@ export function createRecorder() {
 
 export async function transcribeBlob(blob, onStatus) {
   const transcriber = await loadSttEngine(onStatus)
-  setLoadStatus('transcribe', 0, '正在识别英文…')
+  setLoadStatus('transcribe', 0, '正在辨識英文…')
   onStatus?.(getSttLoadStatus())
 
   const { audio, rms } = await blobToMono16k(blob)

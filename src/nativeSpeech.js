@@ -1,5 +1,8 @@
 /** Capacitor native speech (iOS SFSpeechRecognizer). No-ops on web. */
 
+/** Spoken-answer language for mid-to-English practice (must stay English). */
+export const NATIVE_STT_LANG = 'en-US'
+
 export function isNativeApp() {
   try {
     return !!window.Capacitor?.isNativePlatform?.()
@@ -17,30 +20,49 @@ async function getPlugin() {
 /**
  * Native speech session for iOS app builds.
  * Shape: { start({onPartial}) => Promise<result>, stop(), cancel() }
+ *
+ * Relies on listeningState + partialResults. After the engine stops we wait
+ * briefly for a final partial, then resolve — so the UI never sits on
+ * 「識別中」 forever.
  */
 export function createNativeSpeechSession() {
   let plugin = null
   let partialHandle = null
+  let stateHandle = null
   let interim = ''
   let settle = null
   let stopRequested = false
   let safetyTimer = null
+  let finalizeTimer = null
+  let closed = false
 
-  function clearSafety() {
+  function clearTimers() {
     if (safetyTimer) {
       window.clearTimeout(safetyTimer)
       safetyTimer = null
     }
+    if (finalizeTimer) {
+      window.clearTimeout(finalizeTimer)
+      finalizeTimer = null
+    }
   }
 
-  async function cleanup() {
-    clearSafety()
+  async function detachListeners() {
     try {
       await partialHandle?.remove?.()
     } catch {
       // ignore
     }
+    try {
+      await stateHandle?.remove?.()
+    } catch {
+      // ignore
+    }
     partialHandle = null
+    stateHandle = null
+  }
+
+  async function hardStopEngine() {
     try {
       await plugin?.stop?.()
     } catch {
@@ -49,15 +71,28 @@ export function createNativeSpeechSession() {
   }
 
   function finish(extra = {}) {
-    if (!settle) return
+    if (!settle || closed) return
+    closed = true
+    clearTimers()
     const s = settle
     settle = null
     const text = String(interim || '').trim()
-    s.resolve({
-      text,
-      errorCode: extra.errorCode || null,
-      stopRequested,
+    void detachListeners().then(() => {
+      s.resolve({
+        text,
+        errorCode: extra.errorCode || null,
+        stopRequested,
+      })
     })
+  }
+
+  function scheduleFinalize(extra = {}, delayMs = 450) {
+    if (closed) return
+    if (finalizeTimer) window.clearTimeout(finalizeTimer)
+    finalizeTimer = window.setTimeout(() => {
+      finalizeTimer = null
+      void hardStopEngine().finally(() => finish(extra))
+    }, delayMs)
   }
 
   async function start({ onPartial } = {}) {
@@ -79,14 +114,28 @@ export function createNativeSpeechSession() {
       // Older plugin builds may not implement requestPermissions the same way.
     }
 
+    // Ensure any leftover engine is stopped before a new start.
+    try {
+      await plugin.stop()
+    } catch {
+      // ignore
+    }
+    try {
+      await plugin.removeAllListeners?.()
+    } catch {
+      // ignore
+    }
+
     interim = ''
     stopRequested = false
+    closed = false
 
     const done = new Promise((resolve) => {
       settle = { resolve }
     })
 
     partialHandle = await plugin.addListener('partialResults', (data) => {
+      if (closed) return
       const matches = data?.matches || []
       const preview = matches.filter(Boolean).join(' ').trim()
       if (preview) {
@@ -95,31 +144,43 @@ export function createNativeSpeechSession() {
       }
     })
 
+    stateHandle = await plugin.addListener('listeningState', (data) => {
+      if (closed) return
+      if (data?.status === 'stopped') {
+        // endAudio / isFinal — wait briefly for the last partial, then settle.
+        scheduleFinalize({}, 500)
+      }
+    })
+
     await plugin.start({
-      language: 'en-US',
+      language: NATIVE_STT_LANG,
       maxResults: 3,
-      prompt: '请说英文',
+      prompt: '請說英文',
       partialResults: true,
       popup: false,
     })
 
-    // iOS native recognition often auto-stops after a phrase.
+    // Hard ceiling so the UI never hangs.
     safetyTimer = window.setTimeout(() => {
-      void cleanup().then(() => finish({}))
-    }, 15000)
+      void hardStopEngine().finally(() => finish({}))
+    }, 12000)
 
     return done
   }
 
   async function stop() {
     stopRequested = true
-    await cleanup()
-    finish({})
+    if (closed) return
+    await hardStopEngine()
+    // Final transcript often arrives just after endAudio.
+    scheduleFinalize({}, 700)
   }
 
   async function cancel() {
     stopRequested = true
-    await cleanup()
+    clearTimers()
+    await hardStopEngine()
+    await detachListeners()
     finish({ errorCode: 'aborted' })
   }
 
