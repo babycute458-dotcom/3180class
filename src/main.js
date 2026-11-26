@@ -38,7 +38,7 @@ const state = {
 }
 
 const app = document.querySelector('#app')
-const APP_VERSION = 'v19'
+const APP_VERSION = 'v20'
 const TTS_LANG = 'zh-TW'
 const TTS_RELEASE_MS = 0
 
@@ -236,7 +236,11 @@ function settleSpeechResult(expectedEngine, result) {
     return
   }
   if (result?.errorCode === 'timeout') {
-    noteEmptyListen('辨識逾時，請再點「說英文」大聲說清楚，或用下方打字。')
+    noteEmptyListen('辨識逾時，請再點「說英文」後馬上開口，說完再點「我說完了」。')
+    return
+  }
+  if (result?.errorCode === 'start-failed' || result?.errorCode === 'native-speech-unavailable') {
+    noteEmptyListen('語音辨識無法啟動，請重試或用下方打字。')
     return
   }
   noteEmptyListen('沒聽清英文，請再點「說英文」大聲說清楚，或用下方打字。')
@@ -247,28 +251,61 @@ function handleWebSpeechResult(result) {
 }
 
 async function startNativeSpeechListening() {
+  const session = createNativeSpeechSession()
+  let done
   try {
-    const session = createNativeSpeechSession()
-    const done = session.start({
+    done = session.start({
       onPartial: (preview) => {
         if (!preview) return
         state.heard = preview
         render('patch')
       },
     })
-    state.webSpeech = session
-    state.webSpeechDone = done
-    state.engine = 'native'
-    state.listening = true
+  } catch (err) {
     state.micStarting = false
+    state.listening = false
     state.micBusy = false
-    if (!state.awaitingRetry) state.heard = ''
-    state.feedback = { type: 'info', message: '請現在說英文…說完稍等，App 會自動辨識。' }
+    state.engine = null
+    state.feedback = {
+      type: 'warn',
+      message: 'App 語音辨識啟動失敗，請重試或用下方打字。',
+    }
     render('patch')
-    const result = await done
-    // finishListening / cancel may have already settled this session.
+    return
+  }
+
+  state.webSpeech = session
+  state.webSpeechDone = done
+  state.engine = 'native'
+  state.listening = true
+  state.micStarting = false
+  state.micBusy = false
+  if (!state.awaitingRetry) state.heard = ''
+  state.feedback = {
+    type: 'info',
+    message: '請現在說英文…說完會自動辨識，或點「我說完了」。',
+  }
+  render('patch')
+
+  // Hard UI watchdog — never leave the pill on「正在聽」forever.
+  const watch = sleep(10000).then(() => ({
+    text: state.heard || '',
+    errorCode: 'timeout',
+    stopRequested: true,
+  }))
+
+  try {
+    const result = await Promise.race([done, watch])
+    if (state.engine === 'native') {
+      try {
+        await session.stop?.()
+      } catch {
+        // ignore
+      }
+    }
     settleSpeechResult('native', result)
   } catch (err) {
+    if (state.engine !== 'native') return
     state.micStarting = false
     state.listening = false
     state.micBusy = false
@@ -380,29 +417,6 @@ function startListening() {
     }
     render('patch')
   })
-}
-
-async function cancelActiveListen() {
-  const session = state.webSpeech
-  // Clear engine first so the session's auto-settle path no-ops.
-  state.listening = false
-  state.micBusy = false
-  state.micStarting = false
-  state.webSpeech = null
-  state.webSpeechDone = null
-  state.engine = null
-  try {
-    await session?.cancel?.()
-  } catch {
-    try {
-      state.recorder?.cancel?.()
-    } catch {
-      // ignore
-    }
-    state.recorder = null
-  }
-  state.feedback = { type: 'warn', message: '已取消，可再點「說英文」。' }
-  render('patch')
 }
 
 async function finishListening() {
@@ -642,16 +656,12 @@ function statusPill() {
   return { className: 'pill', text: '先點「聽中文」' }
 }
 
-function isOneShotListen() {
-  return state.engine === 'native' || (isAppleMobile() && state.engine === 'webspeech')
-}
-
 function micLabel() {
   if (state.micStarting) return '準備中…'
   if (state.micBusy) return '辨識中…'
   if (state.listening) {
-    // iPhone / native one-shot auto-ends; desktop uses manual 「我說完了」.
-    return isOneShotListen() ? '聽寫中…點此取消' : '我說完了'
+    // Always allow the user to end listening manually — auto-end is best-effort on iOS.
+    return '我說完了'
   }
   if (state.awaitingRetry) return '再講一次'
   return '說英文'
@@ -698,7 +708,7 @@ function renderPractice() {
             <button class="btn btn-primary" data-action="submit-typed" type="button">提交</button>
           </div>
         </div>
-        <p class="hint">手機 App：點「說英文」後馬上開口，說完稍等會自動辨識。聽寫中可點按鈕取消。答案請說英文。</p>
+        <p class="hint">手機 App：點「說英文」後馬上開口；說完稍等，或再點「我說完了」。答案請說英文。</p>
       </section>
     </div>
   `
@@ -791,9 +801,8 @@ app.addEventListener('click', (event) => {
   if (action === 'mic') {
     if (state.micBusy || state.micStarting) return
     if (state.listening) {
-      // One-shot (native / iPhone): button means cancel, not 「finish」.
-      if (isOneShotListen()) void cancelActiveListen()
-      else void finishListening()
+      // Manual end — critical on iOS where recognition may not auto-stop.
+      void finishListening()
     } else {
       void startListening()
     }
