@@ -12,10 +12,18 @@ import {
   transcribeBlob,
   transcribePcm,
 } from './stt.js'
+import { transcribeCloudPcm } from './cloudStt.js'
+import {
+  STT_PRESETS,
+  applyProviderPreset,
+  hasCloudSttKey,
+  loadSttSettings,
+  saveSttSettings,
+} from './settings.js'
 import { isNativeApp, nativePlatformLabel, releaseAudioSession } from './nativeSpeech.js'
 
 const state = {
-  view: 'home',
+  view: 'home', // 'home' | 'practice' | 'settings'
   selected: new Set(['work', 'easy', 'medium', 'advanced']),
   pool: [],
   current: null,
@@ -33,14 +41,17 @@ const state = {
   recorder: null,
   webSpeech: null,
   webSpeechDone: null,
-  engine: null, // 'webspeech' | 'whisper'
+  engine: null, // 'webspeech' | 'whisper' | 'cloud'
   sttReady: false,
   sttLoading: false,
   emptyListenCount: 0,
+  sttSettings: loadSttSettings(),
+  settingsDraft: null,
+  settingsMsg: null,
 }
 
 const app = document.querySelector('#app')
-const APP_VERSION = 'v25'
+const APP_VERSION = 'v26'
 const TTS_LANG = 'zh-TW'
 const TTS_RELEASE_MS = 0
 
@@ -477,20 +488,58 @@ async function finishListening() {
   try {
     const stopped = await recorder.stop()
 
-    // PCM path (iOS App / iPhone) — short sentences are OK; Whisper padding handles length.
+    // PCM path (iOS App / iPhone) — prefer cloud STT (Google-Translate quality).
     if (recorder.kind === 'pcm' || stopped.audio) {
       const { audio, durationMs, rms } = stopped
-      // Only reject if literally no samples (e.g. mic never started).
       if (!audio?.length) {
         state.micBusy = false
         noteEmptyListen('沒錄到音訊，請再點「說英文」。')
         return
       }
-      const { text } = await transcribePcm(audio, onSttStatus, { rms, durationMs })
+
+      let text = ''
+      state.sttSettings = loadSttSettings()
+      if (hasCloudSttKey(state.sttSettings)) {
+        state.feedback = { type: 'info', message: '正在雲端辨識（類似 Google 翻譯）…' }
+        render('patch')
+        try {
+          text = await transcribeCloudPcm(audio, {
+            sampleRate: stopped.sampleRate || 16000,
+            onStatus: onSttStatus,
+          })
+        } catch (err) {
+          state.micBusy = false
+          if (err?.message === 'cloud-auth') {
+            noteEmptyListen('API 金鑰無效。請到「語音設定」重新貼上。')
+          } else if (err?.message === 'cloud-timeout') {
+            noteEmptyListen('雲端辨識逾時，請檢查網路後再試，或用下方打字。')
+          } else {
+            noteEmptyListen(`雲端辨識失敗（${err?.message || 'error'}）。請再試或打字。`)
+          }
+          return
+        }
+      } else {
+        // Offline tiny model — weaker than Google Translate; nudge user to set key.
+        try {
+          const local = await transcribePcm(audio, onSttStatus, { rms, durationMs })
+          text = local.text
+        } catch (err) {
+          state.micBusy = false
+          if (err?.message === 'silent-audio') {
+            noteEmptyListen('幾乎沒錄到聲音。也可到「語音設定」改用雲端辨識（更準）。')
+          } else {
+            noteEmptyListen('本機辨識失敗。請到「語音設定」貼上免費 Groq 金鑰（像 Google 翻譯一樣準）。')
+          }
+          return
+        }
+      }
+
       state.micBusy = false
       if (!text) {
         noteEmptyListen(
-          `沒辨識出英文（音量 ${rms?.toFixed?.(4) || '?'}）。請再試一次，或用下方打字。`,
+          hasCloudSttKey(state.sttSettings)
+            ? '雲端沒辨識出英文，請再說一次或打字。'
+            : '沒辨識出英文。建議到「語音設定」啟用雲端辨識（免費），會準很多。',
         )
         return
       }
@@ -606,13 +655,12 @@ function unlockSpeech() {
 
 function startPractice() {
   unlockSpeech()
-  // Native iOS App always uses Whisper; also preload when Web Speech is missing.
-  if (isNativeApp() || !canUseWebSpeech()) {
+  state.sttSettings = loadSttSettings()
+  // Cloud STT needs no local model. Only preload offline Whisper when no API key.
+  if (!hasCloudSttKey(state.sttSettings) && (isNativeApp() || !canUseWebSpeech())) {
     state.feedback = {
       type: 'info',
-      message: isNativeApp()
-        ? '正在準備語音模型（首次約需下載 40MB）…'
-        : null,
+      message: '尚未設定雲端辨識。可到「語音設定」貼上免費金鑰（較準），或等本機模型載入…',
     }
     void ensureStt().catch(() => {})
   }
@@ -622,6 +670,33 @@ function startPractice() {
   state.correctCount = 0
   state.attemptCount = 0
   nextSentence(false)
+}
+
+function openSettings() {
+  stopSpeaking()
+  cancelRecording()
+  state.sttSettings = loadSttSettings()
+  state.settingsDraft = { ...state.sttSettings }
+  state.settingsMsg = null
+  state.view = 'settings'
+  render('full')
+}
+
+function saveSettingsFromForm() {
+  const draft = state.settingsDraft || loadSttSettings()
+  const keyInput = document.querySelector('#api-key')
+  const provider = document.querySelector('#stt-provider')?.value || draft.provider
+  const withProvider = applyProviderPreset(provider, draft)
+  withProvider.apiKey = keyInput?.value?.trim() || ''
+  state.sttSettings = saveSttSettings(withProvider)
+  state.settingsDraft = { ...state.sttSettings }
+  state.settingsMsg = {
+    type: 'good',
+    text: state.sttSettings.apiKey
+      ? '已儲存。語音會走雲端辨識（類似 Google 翻譯）。'
+      : '已儲存（尚未填金鑰，仍可用打字或本機辨識）。',
+  }
+  render('full')
 }
 
 function toggleSet(id) {
@@ -652,22 +727,27 @@ function isStandaloneApp() {
 function renderHome() {
   const total = SENTENCES.length
   const selectedCount = SENTENCES.filter((s) => state.selected.has(s.set)).length
-  const showInstall = isAppleMobile() && !isStandaloneApp()
+  const showInstall = isAppleMobile() && !isStandaloneApp() && !isNativeApp()
+  const cloudReady = hasCloudSttKey(state.sttSettings)
 
   return `
     <div class="shell">
       <section class="hero">
-        <h1 class="brand"><span>Speak Chinese → Answer English</span>對練</h1>
+        <h1 class="brand"><span>Speak Chinese → Answer English</span>對練 <small class="ver">${APP_VERSION}</small></h1>
         <p class="lede">機器讀中文（台灣），你講英文。說錯會糾正，說對就隨機出下一題。已收錄你筆記本裡的 ${total} 句。</p>
+        ${
+          cloudReady
+            ? `<p class="hint">語音：雲端辨識已開啟（類似 Google 翻譯等級）。</p>`
+            : `<div class="install-card">
+                <strong>啟用「像 Google 翻譯」的語音辨識</strong>
+                <p>Google 翻譯用的是雲端辨識。請先點「語音設定」，免費申請 Groq 金鑰並貼上（約 2 分鐘），辨識會準很多。</p>
+              </div>`
+        }
         ${
           showInstall
             ? `<div class="install-card">
                 <strong>沒有 Mac 也能裝 App（不上架）</strong>
-                <p>用 Windows + Sideloadly 安裝真正的 iPhone App（系統麥克風）。完整步驟見倉庫 <b>APP-INSTALL.md</b>。</p>
-                <ol>
-                  <li>今天可先在 Windows 筆電用 Chrome 打開本頁練習</li>
-                  <li>再到 GitHub Actions 下載 IPA，用 Sideloadly 裝到 iPhone</li>
-                </ol>
+                <p>用 Windows + Sideloadly 安裝 iPhone App。步驟見 <b>APP-INSTALL.md</b>。</p>
               </div>`
             : ''
         }
@@ -683,12 +763,58 @@ function renderHome() {
         </div>
         <div class="cta-row">
           <button class="btn btn-primary" data-action="start" type="button">開始練習（${selectedCount} 句）</button>
+          <button class="btn btn-ghost" data-action="settings" type="button">語音設定</button>
         </div>
         ${
           !canRecordAudio() && !canUseWebSpeech()
             ? `<div class="unsupported">目前瀏覽器可能無法錄音。建議使用 Safari / Chrome；也可以在練習頁用鍵盤輸入。</div>`
-            : `<p class="hint">提示：先點「聽中文」，再點「說英文」。App 版會用系統語音辨識；練習仍是說英文答案。</p>`
+            : `<p class="hint">提示：先點「聽中文」，再點「說英文」。短句也可以，說完點「我說完了」。</p>`
         }
+      </section>
+    </div>
+  `
+}
+
+function renderSettings() {
+  const draft = state.settingsDraft || loadSttSettings()
+  const msg = state.settingsMsg
+  return `
+    <div class="shell">
+      <div class="topbar">
+        <h1>語音設定 <small class="ver">${APP_VERSION}</small></h1>
+        <div class="stats">
+          <button class="btn btn-ghost" data-action="home" type="button">返回</button>
+        </div>
+      </div>
+      <section class="stage settings-stage">
+        <p class="prompt-label">雲端語音辨識（類似 Google 翻譯）</p>
+        <p class="hint">別的 App 能準，是因為用雲端辨識。這裡用免費的 Groq Whisper（與 Google 翻譯同級的雲端模型）。金鑰只存在你手機上。</p>
+        ${
+          msg
+            ? `<div class="settings-msg ${msg.type === 'good' ? 'good' : 'warn'}">${escapeHtml(msg.text)}</div>`
+            : ''
+        }
+        <label class="field-label" for="stt-provider">服務</label>
+        <select id="stt-provider" class="field-input">
+          ${Object.values(STT_PRESETS)
+            .map(
+              (p) =>
+                `<option value="${p.id}" ${draft.provider === p.id ? 'selected' : ''}>${escapeHtml(p.label)}</option>`,
+            )
+            .join('')}
+        </select>
+        <label class="field-label" for="api-key">API 金鑰</label>
+        <input id="api-key" class="field-input" type="password" autocomplete="off" placeholder="貼上 gsk_… 或 sk-…" value="${escapeHtml(draft.apiKey)}" />
+        <ol class="setup-steps">
+          <li>打開 <a href="${escapeHtml(STT_PRESETS[draft.provider]?.helpUrl || STT_PRESETS.groq.helpUrl)}" target="_blank" rel="noopener">申請金鑰頁面</a>（Groq 免費）</li>
+          <li>註冊／登入後建立 API Key</li>
+          <li>複製金鑰，貼到上方欄位</li>
+          <li>點「儲存」</li>
+        </ol>
+        <div class="cta-row">
+          <button class="btn btn-primary" data-action="save-settings" type="button">儲存</button>
+          <button class="btn btn-ghost" data-action="start" type="button">開始練習</button>
+        </div>
       </section>
     </div>
   `
@@ -729,6 +855,7 @@ function renderPractice() {
         <div class="stats">
           <span>答對 <b data-el="correct">${state.correctCount}</b></span>
           <span>作答 <b data-el="attempts">${state.attemptCount}</b></span>
+          <button class="btn btn-ghost" data-action="settings" type="button">語音</button>
           <button class="btn btn-ghost" data-action="home" type="button">返回</button>
         </div>
       </div>
@@ -758,10 +885,16 @@ function renderPractice() {
             <button class="btn btn-primary" data-action="submit-typed" type="button">提交</button>
           </div>
         </div>
-        <p class="hint">手機 App：等中文讀完 → 點「說英文」並立刻開口 → 再說一次點「我說完了」。不行就打字。答案請說英文。</p>
+        <p class="hint">說完點「我說完了」。短句也可以。${
+          hasCloudSttKey(state.sttSettings)
+            ? '目前：雲端辨識（類似 Google 翻譯）。'
+            : '尚未設定雲端金鑰 → 點上方「語音」啟用（免費、更準）。'
+        }</p>
         ${
           isNativeApp()
-            ? `<p class="hint debug-perm">系統：${escapeHtml(nativePlatformLabel())} · PCM+Whisper v25</p>`
+            ? `<p class="hint debug-perm">系統：${escapeHtml(nativePlatformLabel())} · ${
+                hasCloudSttKey(state.sttSettings) ? 'Cloud STT' : '本機備援'
+              } v26</p>`
             : ''
         }
       </section>
@@ -822,6 +955,10 @@ function render(mode = 'full') {
     app.innerHTML = renderHome()
     return
   }
+  if (state.view === 'settings') {
+    app.innerHTML = renderSettings()
+    return
+  }
 
   if (mode === 'patch' && app.querySelector('[data-practice]')) {
     patchPractice()
@@ -831,6 +968,18 @@ function render(mode = 'full') {
   app.innerHTML = renderPractice()
   clearTypedInput()
 }
+
+app.addEventListener('change', (event) => {
+  if (event.target?.id === 'stt-provider' && state.view === 'settings') {
+    const provider = event.target.value
+    const key = document.querySelector('#api-key')?.value || ''
+    state.settingsDraft = applyProviderPreset(provider, {
+      ...(state.settingsDraft || loadSttSettings()),
+      apiKey: key,
+    })
+    render('full')
+  }
+})
 
 app.addEventListener('click', (event) => {
   const target = event.target.closest('[data-action], [data-set]')
@@ -843,9 +992,12 @@ app.addEventListener('click', (event) => {
 
   const action = target.dataset.action
   if (action === 'start') startPractice()
+  if (action === 'settings') openSettings()
+  if (action === 'save-settings') saveSettingsFromForm()
   if (action === 'home') {
     stopSpeaking()
     cancelRecording()
+    state.sttSettings = loadSttSettings()
     state.view = 'home'
     render('full')
   }
@@ -856,7 +1008,6 @@ app.addEventListener('click', (event) => {
   if (action === 'mic') {
     if (state.micBusy || state.micStarting) return
     if (state.listening) {
-      // Manual end — critical on iOS where recognition may not auto-stop.
       void finishListening()
     } else {
       void startListening()

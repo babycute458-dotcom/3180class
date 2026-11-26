@@ -383,6 +383,54 @@ button {
   font-size: 0.78rem;
 }
 
+.settings-stage .field-label {
+  display: block;
+  margin: 1rem 0 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.settings-stage .field-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.75rem 0.9rem;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+}
+
+.setup-steps {
+  margin: 1rem 0 0;
+  padding-left: 1.2rem;
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.setup-steps a {
+  color: var(--accent-deep);
+}
+
+.settings-msg {
+  margin-top: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 12px;
+  font-size: 0.9rem;
+}
+
+.settings-msg.good {
+  background: var(--good-bg);
+  color: var(--good);
+}
+
+.settings-msg.warn {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
 .hint {
   margin: 1rem 0 0;
   color: var(--ink-soft);
