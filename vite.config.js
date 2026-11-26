@@ -8,7 +8,7 @@ export default defineConfig({
     port: 5173,
   },
   optimizeDeps: {
-    exclude: ['@huggingface/transformers'],
+    exclude: ['@huggingface/transformers', '@capacitor-community/speech-recognition'],
   },
   build: {
     target: 'esnext',

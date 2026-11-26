@@ -1,0 +1,21 @@
+{
+  "appId": "com.babycute.duilian",
+  "appName": "对练",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  },
+  "ios": {
+    "contentInset": "automatic",
+    "preferredContentMode": "mobile"
+  },
+  "plugins": {
+    "SpeechRecognition": {
+      "permissions": {
+        "speechRecognition": "对练需要语音识别，才能听你说的英文并纠正。",
+        "microphone": "对练需要使用麦克风，才能练习说英文。"
+      }
+    }
+  }
+}

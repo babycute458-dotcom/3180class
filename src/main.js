@@ -10,6 +10,7 @@ import {
   loadSttEngine,
   transcribeBlob,
 } from './stt.js'
+import { createNativeSpeechSession, isNativeApp } from './nativeSpeech.js'
 
 const state = {
   view: 'home',
@@ -37,7 +38,7 @@ const state = {
 }
 
 const app = document.querySelector('#app')
-const APP_VERSION = 'v17'
+const APP_VERSION = 'v18'
 const TTS_RELEASE_MS = 0
 
 function normalize(text) {
@@ -228,6 +229,61 @@ function handleWebSpeechResult(result) {
   noteEmptyListen('没听清英文，请再点「说英文」大声说清楚，或用下方打字。')
 }
 
+async function startNativeSpeechListening() {
+  try {
+    const session = createNativeSpeechSession()
+    const done = session.start({
+      onPartial: (preview) => {
+        if (!preview) return
+        state.heard = preview
+        render('patch')
+      },
+    })
+    state.webSpeech = session
+    state.webSpeechDone = done
+    state.engine = 'native'
+    state.listening = true
+    state.micStarting = false
+    if (!state.awaitingRetry) state.heard = ''
+    state.feedback = { type: 'info', message: '请现在说英文…说完稍等，App 会自动识别。' }
+    render('patch')
+    const result = await done
+    if (state.engine !== 'native') return
+    state.listening = false
+    state.micBusy = false
+    state.webSpeech = null
+    state.webSpeechDone = null
+    state.engine = null
+    const textHeard = String(result?.text || '').trim()
+    if (textHeard) {
+      state.emptyListenCount = 0
+      evaluateAnswer(textHeard)
+      return
+    }
+    if (result?.errorCode === 'not-allowed') {
+      noteEmptyListen('请允许麦克风 / 语音识别权限。')
+      return
+    }
+    if (result?.errorCode === 'aborted') {
+      noteEmptyListen('已取消。')
+      return
+    }
+    noteEmptyListen('没听清英文，请再点「说英文」大声说清楚，或用下方打字。')
+  } catch (err) {
+    state.micStarting = false
+    state.listening = false
+    state.engine = null
+    const denied = err?.name === 'NotAllowedError' || err?.message === 'not-allowed'
+    state.feedback = {
+      type: 'warn',
+      message: denied
+        ? '请允许麦克风 / 语音识别权限后再试。'
+        : 'App 语音识别启动失败，请重试或用下方打字。',
+    }
+    render('patch')
+  }
+}
+
 function startWebSpeechListening() {
   // iPhone: one-shot is far more reliable than continuous + manual stop.
   const continuous = !isAppleMobile()
@@ -294,12 +350,16 @@ function startListening() {
   render('patch')
 
   try {
+    if (isNativeApp()) {
+      void startNativeSpeechListening()
+      return
+    }
     if (canUseWebSpeech()) {
       startWebSpeechListening()
       return
     }
   } catch (err) {
-    console.warn('[mic] webspeech start failed, falling back', err)
+    console.warn('[mic] speech start failed, falling back', err)
   }
 
   void startWhisperListening().catch((err) => {
@@ -328,7 +388,7 @@ async function finishListening() {
   state.feedback = { type: 'info', message: '正在识别英文…' }
   render('patch')
 
-  if (engine === 'webspeech' && state.webSpeech) {
+  if ((engine === 'webspeech' || engine === 'native') && state.webSpeech) {
     const session = state.webSpeech
     const done = state.webSpeechDone
     try {
@@ -512,12 +572,11 @@ function renderHome() {
         ${
           showInstall
             ? `<div class="install-card">
-                <strong>做成手机 App（不上架）</strong>
-                <p>请用 <b>Safari</b> 打开本页 → 点底部分享按钮 → <b>加入主画面</b>。之后从桌面图标打开，麦克风会稳很多。</p>
+                <strong>没有 Mac 也能装 App（不上架）</strong>
+                <p>用 Windows + Sideloadly 安装真正的 iPhone App（系统麦克风）。完整步骤见仓库 <b>APP-INSTALL.md</b>。</p>
                 <ol>
-                  <li>用 Safari 打开这个网址</li>
-                  <li>点分享（方框+箭头）</li>
-                  <li>选择「加入主画面」</li>
+                  <li>今天可先在 Windows 笔记本用 Chrome 打开本页练习</li>
+                  <li>再到 GitHub Actions 下载 IPA，用 Sideloadly 装到 iPhone</li>
                 </ol>
               </div>`
             : ''
@@ -562,7 +621,9 @@ function micLabel() {
   if (state.micBusy) return '识别中…'
   if (state.listening) {
     // iPhone one-shot auto-ends; desktop uses manual 「我说完了」.
-    return isAppleMobile() && state.engine === 'webspeech' ? '听写中…点此取消' : '我说完了'
+    return state.engine === 'native' || (isAppleMobile() && state.engine === 'webspeech')
+      ? '听写中…点此取消'
+      : '我说完了'
   }
   if (state.awaitingRetry) return '再讲一次'
   return '说英文'

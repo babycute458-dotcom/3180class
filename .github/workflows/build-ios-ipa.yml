@@ -1,0 +1,72 @@
+name: Build duilian iOS IPA (Sideloadly)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ipa:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install & build web
+        run: |
+          npm install
+          npm run build
+
+      - name: Install Capacitor + speech plugin
+        run: |
+          npm install @capacitor/core @capacitor/cli @capacitor/ios @capacitor-community/speech-recognition
+
+      - name: Add iOS platform & sync
+        run: |
+          npx cap add ios
+          npx cap sync ios
+
+      - name: Patch Info.plist privacy strings
+        run: |
+          PLIST="ios/App/App/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 对练需要使用麦克风，才能练习说英文。" "$PLIST" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :NSMicrophoneUsageDescription 对练需要使用麦克风，才能练习说英文。" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :NSSpeechRecognitionUsageDescription string 对练需要语音识别，才能听你说的英文并纠正。" "$PLIST" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :NSSpeechRecognitionUsageDescription 对练需要语音识别，才能听你说的英文并纠正。" "$PLIST"
+
+      - name: Build unsigned iOS app
+        run: |
+          set -euo pipefail
+          cd ios/App
+          xcodebuild \
+            -project App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath DerivedData \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package IPA
+        run: |
+          set -euo pipefail
+          APP_PATH=$(find ios/App/DerivedData/Build/Products -name 'App.app' -print -quit)
+          echo "Using $APP_PATH"
+          rm -rf Payload duilian.ipa
+          mkdir Payload
+          cp -R "$APP_PATH" Payload/
+          zip -r duilian.ipa Payload
+          ls -lh duilian.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: duilian-ios-ipa
+          path: duilian.ipa
+          if-no-files-found: error

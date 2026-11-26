@@ -1,47 +1,70 @@
-# 对练 App 版（不上架）
+# 对练 App（不上架）— 只有 Windows 笔记本 + iPhone
 
-有两种「像 App」的用法，都**不必上 App Store**：
+网页版麦克风在 iPhone 上常常失败。要变成**真正的 App**（用系统语音识别），又没有 Mac，可以走这条路：
 
-## 方案 A：加到主画面（立刻可用，推荐先试）
+> **云端自动打包 IPA → 你在 Windows 用 Sideloadly 装到 iPhone**  
+> 不上 App Store、不公开，只装你自己的手机。
 
-这是网页做成的桌面 App（PWA），不上架、不审核。
+---
 
-1. iPhone 用 **Safari** 打开：  
-   https://babycute458-dotcom.github.io/3180class/duilian/
-2. 点底部分享按钮（方框 + 箭头）
-3. 选 **加入主画面**
-4. 以后从桌面图标打开「对练」
+## 你需要准备
 
-这样会用 Safari 的正式环境，麦克风通常比 App 内置浏览器稳。
+1. Windows 笔记本  
+2. iPhone + 数据线  
+3. 免费的 Apple ID（登录 iPhone 的那个即可）  
+4. 安装 [Sideloadly](https://sideloadly.io/)（Windows 版）
 
-## 方案 B：真正的 iOS 壳 App（需 Mac + 数据线，仍不上架）
+---
 
-用 Capacitor 包一层原生壳，可用系统语音识别。  
-**不能在这台 Linux 云端机编译 iPhone 安装包**，需要你在自己的 Mac 上：
+## 步骤 A：下载 IPA（云端打包）
 
-```bash
-cd duilian
-npm install
-npm run build
-npm install @capacitor/core @capacitor/cli @capacitor/ios @capacitor-community/speech-recognition
-npx cap init duilian com.babycute.duilian --web-dir dist
-npx cap add ios
-npx cap sync ios
-npx cap open ios
-```
+1. 打开 GitHub 仓库 Actions：  
+   https://github.com/babycute458-dotcom/3180class/actions  
+2. 左侧选 **Build duilian iOS IPA (Sideloadly)**  
+3. 右边 **Run workflow**  
+   - Branch 选：`cursor/duilian-speech-practice-d923`  
+4. 等几分钟，点进这次运行 → **Artifacts** → 下载 `duilian-ios-ipa`  
+5. 解压后得到 `duilian.ipa`
 
-然后在 Xcode：
+（若 Actions 里还看不到这个 workflow，等我推送完成后刷新即可。）
 
-1. 选你的 Apple ID（免费账号即可，装自己手机）
-2. Signing：勾选 Automatically manage signing
-3. 用数据线连 iPhone → 选你的设备 → Run
-4. 手机上若提示「不受信任的开发者」：设置 → 通用 → VPN 与设备管理 → 信任
+---
 
-这样装好的 App **只在你自己手机上**，不会上架、也不会公开分发。
+## 步骤 B：Windows 用 Sideloadly 装到 iPhone
 
-免费 Apple ID 证书大约每 7 天需重新在 Xcode 点一次 Run。
+1. iPhone：设置 → 隐私与安全性 → 开发者模式（若有）打开；用数据线连电脑  
+2. 打开 Sideloadly  
+3. iPhone 插上后应出现在设备列表  
+4. Apple 账号：填你的 Apple ID（会在本机签名，密码按提示输入）  
+5. IPA：选刚下载的 `duilian.ipa`  
+6. 点 Start，等安装完成  
+7. iPhone 上：设置 → 通用 → VPN 与设备管理 → 信任你的 Apple ID  
+8. 主画面打开 **对练**
 
-## 为什么网页麦克风在手机上容易失败
+免费 Apple ID 大约 **每 7 天**要用 Sideloadly 再装一次（重新签名）。这是不上架、不付费开发者账号的正常限制。
 
-iPhone 对浏览器麦克风限制很严；从 Cursor / 微信等 **App 内置浏览器** 打开时更常失败。  
-先做方案 A（Safari → 加入主画面）通常就能改善。
+---
+
+## 临时练习（今天就能用）
+
+在你的 **Windows 笔记本** 用 Chrome 打开网页版练习：  
+https://babycute458-dotcom.github.io/3180class/duilian/  
+
+电脑版 Chrome 麦克风通常比 iPhone 浏览器稳很多。
+
+---
+
+## 和「加入主画面」的差别
+
+| | Safari 加入主画面 | Sideloadly 安装的 App |
+|--|--|--|
+| 要不要 Mac | 不用 | 不用（用云端打包） |
+| 是不是浏览器内核 | 是（还是 Safari） | 否（原生壳 + 系统语音） |
+| 麦克风 | 容易失败 | 用系统识别，稳很多 |
+| 上架 | 不用 | 不用 |
+
+---
+
+## 说明
+
+这台帮你写程序的云端机器是 Linux，**不能直接编 iPhone 安装包**；所以改成 GitHub 的 Mac 云端机打包，你在 Windows 安装。
