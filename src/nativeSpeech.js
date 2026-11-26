@@ -1,5 +1,7 @@
 /** Capacitor native speech (iOS SFSpeechRecognizer). No-ops on web. */
 
+import { Capacitor } from '@capacitor/core'
+
 /** Spoken-answer language for Chinese→English practice (must stay English). */
 export const NATIVE_STT_LANG = 'en-US'
 
@@ -9,9 +11,17 @@ const STOP_TIMEOUT_MS = 1500
 
 export function isNativeApp() {
   try {
-    return !!window.Capacitor?.isNativePlatform?.()
+    return !!Capacitor?.isNativePlatform?.()
   } catch {
     return false
+  }
+}
+
+export function nativePlatformLabel() {
+  try {
+    return `${Capacitor.getPlatform()} / native=${Capacitor.isNativePlatform()}`
+  } catch {
+    return 'unknown'
   }
 }
 
@@ -34,14 +44,110 @@ function withTimeout(promise, ms, fallback) {
 }
 
 /**
+ * Force the iOS microphone privacy prompt via getUserMedia.
+ * Native SFSpeechRecognizer alone sometimes never surfaces Settings toggles
+ * on sideloaded builds; WKWebView mic access reliably creates them.
+ */
+async function ensureWebkitMicPermission() {
+  if (!navigator?.mediaDevices?.getUserMedia) {
+    return { ok: false, reason: 'no-getUserMedia' }
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+      },
+      video: false,
+    })
+    for (const track of stream.getTracks()) {
+      try {
+        track.stop()
+      } catch {
+        // ignore
+      }
+    }
+    return { ok: true, reason: 'granted' }
+  } catch (err) {
+    const name = err?.name || ''
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+      return { ok: false, reason: 'denied' }
+    }
+    return { ok: false, reason: name || 'getUserMedia-failed' }
+  }
+}
+
+/**
+ * Ask for Speech Recognition + Microphone. Must run inside a user gesture.
+ * Returns { ok, status, detail }.
+ */
+export async function ensureNativeSpeechPermission() {
+  if (!isNativeApp()) {
+    return { ok: false, status: 'web', detail: 'not-native' }
+  }
+
+  // 1) Force Microphone into iOS Settings via WebKit.
+  const mic = await ensureWebkitMicPermission()
+  if (!mic.ok && mic.reason === 'denied') {
+    return {
+      ok: false,
+      status: 'denied',
+      detail: 'microphone-denied',
+    }
+  }
+
+  const plugin = await getPlugin()
+  if (!plugin) {
+    return { ok: false, status: 'unavailable', detail: 'no-plugin' }
+  }
+
+  let available = { available: false }
+  try {
+    available = await withTimeout(plugin.available(), 3000, { available: false })
+  } catch {
+    available = { available: false }
+  }
+  if (!available?.available) {
+    return { ok: false, status: 'unavailable', detail: 'speech-unavailable' }
+  }
+
+  // 2) Speech-recognition permission (system dialog).
+  let status = 'prompt'
+  try {
+    const checked = await withTimeout(plugin.checkPermissions(), 3000, null)
+    status = checked?.speechRecognition || 'prompt'
+  } catch {
+    // ignore
+  }
+
+  if (status !== 'granted') {
+    try {
+      // Long window — user must tap 允許 on the system alert.
+      const requested = await withTimeout(plugin.requestPermissions(), 120000, null)
+      status = requested?.speechRecognition || status
+    } catch {
+      // ignore
+    }
+    try {
+      const checked = await withTimeout(plugin.checkPermissions(), 3000, null)
+      status = checked?.speechRecognition || status
+    } catch {
+      // ignore
+    }
+  }
+
+  if (status === 'granted') {
+    return { ok: true, status, detail: mic.ok ? 'mic+speech' : `speech-only:${mic.reason}` }
+  }
+  if (status === 'denied') {
+    return { ok: false, status, detail: 'speech-denied' }
+  }
+  return { ok: false, status: status || 'prompt', detail: 'speech-not-granted' }
+}
+
+/**
  * Native speech session for iOS app builds.
  * Shape: { start({onPartial}) => Promise<result>, stop(), cancel() }
- *
- * iOS SFSpeechAudioBufferRecognitionRequest does NOT auto-finalize until
- * endAudio()/stop(). We therefore:
- *  - end on silence after partial text
- *  - hard-cap total listen time
- *  - never await plugin.stop without a timeout (prevents UI deadlocks)
  */
 export function createNativeSpeechSession() {
   let plugin = null
@@ -98,7 +204,6 @@ export function createNativeSpeechSession() {
       errorCode: extra.errorCode || null,
       stopRequested,
     }
-    // Detach in background; never block settle on plugin calls.
     void detachListeners()
     void hardStopEngine()
     s.resolve(payload)
@@ -112,16 +217,11 @@ export function createNativeSpeechSession() {
       if (closed || !interim) return
       stopRequested = true
       void hardStopEngine().finally(() => {
-        // Brief wait for a last partial after endAudio, then settle.
         window.setTimeout(() => finish({}), 350)
       })
     }, SILENCE_END_MS)
   }
 
-  /**
-   * Returns a promise that resolves to { text, errorCode, stopRequested }.
-   * Safe to call stop()/cancel() while this is pending.
-   */
   function start({ onPartial } = {}) {
     if (starting || (settle && !closed)) {
       return Promise.resolve({ text: '', errorCode: 'busy', stopRequested: true })
@@ -135,7 +235,6 @@ export function createNativeSpeechSession() {
       settle = { resolve }
     })
 
-    // Watchdog from the first moment — before any plugin await.
     safetyTimer = window.setTimeout(() => {
       stopRequested = true
       void hardStopEngine().finally(() => finish({ errorCode: interim ? null : 'timeout' }))
@@ -149,18 +248,32 @@ export function createNativeSpeechSession() {
         const available = await withTimeout(plugin.available(), 2500, { available: false })
         if (!available?.available) throw new Error('native-speech-unavailable')
 
+        // Permissions should already be granted via ensureNativeSpeechPermission().
+        // Re-check; if not granted, fail clearly instead of listening to silence.
+        let permStatus = 'prompt'
         try {
-          const perm = await withTimeout(plugin.requestPermissions(), 5000, null)
-          if (perm?.speechRecognition === 'denied') {
-            const err = new Error('not-allowed')
-            err.name = 'NotAllowedError'
-            throw err
+          const checked = await withTimeout(plugin.checkPermissions(), 2500, null)
+          permStatus = checked?.speechRecognition || 'prompt'
+        } catch {
+          // ignore
+        }
+        if (permStatus !== 'granted') {
+          try {
+            const requested = await withTimeout(plugin.requestPermissions(), 60000, null)
+            permStatus = requested?.speechRecognition || permStatus
+          } catch {
+            // ignore
           }
-        } catch (err) {
-          if (err?.name === 'NotAllowedError') throw err
+        }
+        if (permStatus === 'denied') {
+          const err = new Error('not-allowed')
+          err.name = 'NotAllowedError'
+          throw err
+        }
+        if (permStatus !== 'granted') {
+          throw new Error('permission-pending')
         }
 
-        // Clear any leftover session; never hang here.
         await withTimeout(plugin.stop(), STOP_TIMEOUT_MS, null)
         try {
           await withTimeout(plugin.removeAllListeners?.() ?? Promise.resolve(), 1000, null)
@@ -183,7 +296,6 @@ export function createNativeSpeechSession() {
         stateHandle = await plugin.addListener('listeningState', (data) => {
           if (closed) return
           if (data?.status === 'stopped') {
-            // Engine stopped (isFinal or our stop). Collect last partial briefly.
             window.setTimeout(() => finish({}), 300)
           }
         })
@@ -200,7 +312,9 @@ export function createNativeSpeechSession() {
       } catch (err) {
         const denied = err?.name === 'NotAllowedError' || err?.message === 'not-allowed'
         finish({
-          errorCode: denied ? 'not-allowed' : err?.message || 'start-failed',
+          errorCode: denied
+            ? 'not-allowed'
+            : err?.message || 'start-failed',
         })
       } finally {
         starting = false

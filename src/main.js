@@ -10,7 +10,12 @@ import {
   loadSttEngine,
   transcribeBlob,
 } from './stt.js'
-import { createNativeSpeechSession, isNativeApp } from './nativeSpeech.js'
+import {
+  createNativeSpeechSession,
+  ensureNativeSpeechPermission,
+  isNativeApp,
+  nativePlatformLabel,
+} from './nativeSpeech.js'
 
 const state = {
   view: 'home',
@@ -31,14 +36,15 @@ const state = {
   recorder: null,
   webSpeech: null,
   webSpeechDone: null,
-  engine: null, // 'webspeech' | 'whisper'
+  engine: null, // 'webspeech' | 'whisper' | 'native'
   sttReady: false,
   sttLoading: false,
   emptyListenCount: 0,
+  nativePerm: null, // { ok, status, detail } | null
 }
 
 const app = document.querySelector('#app')
-const APP_VERSION = 'v20'
+const APP_VERSION = 'v21'
 const TTS_LANG = 'zh-TW'
 const TTS_RELEASE_MS = 0
 
@@ -198,11 +204,20 @@ async function ensureStt() {
   state.sttLoading = false
 }
 
+function permissionHelpText() {
+  return (
+    '請刪除 App 後重裝。打開後點「說英文」時，系統會跳出「麥克風」與「語音辨識」權限，兩次都要點「允許」。' +
+    '授權後可到「設定 → 隱私權與安全性 → 麥克風／語音辨識」確認已開啟對練。'
+  )
+}
+
 function noteEmptyListen(message) {
   state.emptyListenCount += 1
   let tip = message
-  if (state.emptyListenCount >= 2 && isAppleMobile()) {
-    tip += ' 若一直不行：請到「設定 → 對練」確認麥克風／語音辨識已開啟。'
+  if (state.emptyListenCount >= 2) {
+    tip += isNativeApp()
+      ? ` ${permissionHelpText()}`
+      : ' 若一直不行：請用 App 版（非瀏覽器），並允許麥克風。'
   }
   state.feedback = { type: 'warn', message: tip }
   render('patch')
@@ -223,7 +238,11 @@ function settleSpeechResult(expectedEngine, result) {
     return
   }
   if (result?.errorCode === 'not-allowed') {
-    noteEmptyListen('請允許麥克風／語音辨識權限後再試。')
+    noteEmptyListen(`沒有麥克風或語音辨識權限。${permissionHelpText()}`)
+    return
+  }
+  if (result?.errorCode === 'permission-pending') {
+    noteEmptyListen(`請先在系統彈窗點「允許」。${permissionHelpText()}`)
     return
   }
   if (result?.errorCode === 'aborted') {
@@ -251,6 +270,30 @@ function handleWebSpeechResult(result) {
 }
 
 async function startNativeSpeechListening() {
+  state.feedback = {
+    type: 'info',
+    message: '請在接下來的系統彈窗點「允許」（麥克風／語音辨識）…',
+  }
+  render('patch')
+
+  const perm = await ensureNativeSpeechPermission()
+  state.nativePerm = perm
+  if (!perm.ok) {
+    state.micStarting = false
+    state.listening = false
+    state.micBusy = false
+    state.engine = null
+    const denied = perm.status === 'denied' || perm.detail?.includes('denied')
+    state.feedback = {
+      type: 'warn',
+      message: denied
+        ? `權限被拒絕。${permissionHelpText()}`
+        : `尚未取得麥克風／語音辨識權限（${perm.status}/${perm.detail}）。${permissionHelpText()}`,
+    }
+    render('patch')
+    return
+  }
+
   const session = createNativeSpeechSession()
   let done
   try {
@@ -261,7 +304,7 @@ async function startNativeSpeechListening() {
         render('patch')
       },
     })
-  } catch (err) {
+  } catch {
     state.micStarting = false
     state.listening = false
     state.micBusy = false
@@ -316,7 +359,7 @@ async function startNativeSpeechListening() {
     state.feedback = {
       type: 'warn',
       message: denied
-        ? '請允許麥克風／語音辨識權限後再試。'
+        ? `沒有麥克風或語音辨識權限。${permissionHelpText()}`
         : 'App 語音辨識啟動失敗，請重試或用下方打字。',
     }
     render('patch')
@@ -708,7 +751,16 @@ function renderPractice() {
             <button class="btn btn-primary" data-action="submit-typed" type="button">提交</button>
           </div>
         </div>
-        <p class="hint">手機 App：點「說英文」後馬上開口；說完稍等，或再點「我說完了」。答案請說英文。</p>
+        <p class="hint">手機 App：點「說英文」後，先在系統彈窗點「允許」，再馬上開口；說完稍等或點「我說完了」。答案請說英文。</p>
+        ${
+          isNativeApp()
+            ? `<p class="hint debug-perm">系統：${escapeHtml(nativePlatformLabel())}${
+                state.nativePerm
+                  ? ` · 權限 ${escapeHtml(String(state.nativePerm.status))}/${escapeHtml(String(state.nativePerm.detail))}`
+                  : ' · 權限尚未請求'
+              }</p>`
+            : ''
+        }
       </section>
     </div>
   `
