@@ -145,6 +145,8 @@ const PHRASE_RULES = [
   [/pay with cash/g, 'pay cash'],
 
   // time / place
+  [/at what time/g, 'when'],
+  [/what time/g, 'when'],
   [/i am on my way/g, 'on the way'],
   [/i am coming/g, 'on the way'],
   [/see you tomorrow/g, 'bye tomorrow'],

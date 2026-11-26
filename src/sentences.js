@@ -1353,7 +1353,12 @@ export const SENTENCES = [
   { id: "a277", set: "advanced", zh: "你聽說昨天發生什麼了嗎？", en: "Did you hear what happened yesterday?" },
   { id: "a278", set: "advanced", zh: "好像有點誤會。", en: "There seems to be a misunderstanding." },
   { id: "a279", set: "advanced", zh: "你這週末有空嗎？", en: "Are you free this coming weekend?" },
-  { id: "a280", set: "advanced", zh: "我應該幾點過來？", en: "What time should I come over?" },
+  { id: "a280", set: "advanced", zh: "我應該幾點過來？", en: "What time should I come over?",
+    alts: [
+          "When should I come over?",
+          "What time should I come by?",
+          "When should I come by?"
+    ] },
   { id: "a281", set: "advanced", zh: "你這樣說真是太客氣了。", en: "That's very kind of you to say.",
     alts: [
           "That is very kind of you to say."

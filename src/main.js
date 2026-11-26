@@ -20,6 +20,7 @@ import {
   saveSttSettings,
 } from './settings.js'
 import { isNativeApp, nativePlatformLabel, releaseAudioSession } from './nativeSpeech.js'
+import { sameMeaning } from './meaning.js'
 
 const state = {
   view: 'home', // 'home' | 'practice' | 'settings'
@@ -52,7 +53,7 @@ const state = {
 }
 
 const app = document.querySelector('#app')
-const APP_VERSION = 'v27'
+const APP_VERSION = 'v28'
 const TTS_LANG = 'zh-TW'
 const TTS_RELEASE_MS = 0
 
@@ -66,14 +67,15 @@ function normalize(text) {
 }
 
 /**
- * Strict match: heard must equal expected (or an explicit alt) after normalize.
- * Wrong words / inaccurate pronunciation that ASR captures differently will NOT pass.
+ * Pass when meaning matches (exact, listed alts, or same-meaning paraphrase).
+ * Completely wrong words / wrong meaning still fail. ASR text is always shown.
  */
 function isMatch(heard, expected, alts = []) {
   const h = normalize(heard)
   if (!h) return false
   const candidates = [expected, ...(alts || [])].map(normalize).filter(Boolean)
-  return candidates.includes(h)
+  if (candidates.includes(h)) return true
+  return sameMeaning(heard, expected, alts)
 }
 
 /** Highlight which heard words match the target sentence. */
@@ -624,7 +626,7 @@ function evaluateAnswer(heard) {
     state.correctCount += 1
     state.feedback = {
       type: 'good',
-      message: '正確！請核對下方辨識文字，再自己按「下一題」。',
+      message: '意思對了！請看下方「系統聽到的字」，再自己按「下一題」。',
     }
     render('full')
     return
@@ -634,7 +636,7 @@ function evaluateAnswer(heard) {
   state.roundPassed = false
   state.feedback = {
     type: 'bad',
-    message: '字不對，不能下一題。紅色是系統聽到但不符的字；請再講一次或打字。',
+    message: '意思不對，不能下一題。紅色是系統聽到但不符的字；請再講一次或打字。',
     answer: expected,
   }
   render('full')
@@ -792,7 +794,7 @@ function renderHome() {
     <div class="shell">
       <section class="hero">
         <h1 class="brand"><span>Speak Chinese → Answer English</span>對練 <small class="ver">${APP_VERSION}</small></h1>
-        <p class="lede">機器讀中文（台灣），你講英文。辨識字必須整句正確才過關；答對後請自己按「下一題」。已收錄你筆記本裡的 ${total} 句。</p>
+        <p class="lede">機器讀中文（台灣），你講英文。意思對就算過關（同義說法可）；答對後請自己按「下一題」。已收錄你筆記本裡的 ${total} 句。</p>
         ${
           cloudReady
             ? `<p class="hint">語音：雲端辨識已開啟（類似 Google 翻譯等級）。</p>`
@@ -953,7 +955,7 @@ function renderPractice() {
             <button class="btn btn-primary" data-action="submit-typed" type="button" ${state.roundPassed ? 'disabled' : ''}>提交</button>
           </div>
         </div>
-        <p class="hint">規則：辨識到的英文必須整句正確才算過關；答對後不會自動跳題，請自己按「下一題」。紅字＝聽到但不對。</p>
+        <p class="hint">規則：意思對就算過關（例如 When / What time 同義）；答對後不會自動跳題，請自己按「下一題」。紅字＝聽到但不對。</p>
         ${
           isNativeApp()
             ? `<p class="hint debug-perm">系統：${escapeHtml(nativePlatformLabel())} · ${
