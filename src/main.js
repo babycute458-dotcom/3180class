@@ -4,11 +4,13 @@ import { sameMeaning } from './meaning.js'
 import {
   canRecordAudio,
   canUseWebSpeech,
+  createPcmRecorder,
   createRecorder,
   createWebSpeechSession,
   isAppleMobile,
   loadSttEngine,
   transcribeBlob,
+  transcribePcm,
 } from './stt.js'
 import { isNativeApp, nativePlatformLabel, releaseAudioSession } from './nativeSpeech.js'
 
@@ -38,7 +40,7 @@ const state = {
 }
 
 const app = document.querySelector('#app')
-const APP_VERSION = 'v23'
+const APP_VERSION = 'v24'
 const TTS_LANG = 'zh-TW'
 const TTS_RELEASE_MS = 0
 
@@ -252,8 +254,8 @@ function handleWebSpeechResult(result) {
 }
 
 /**
- * iOS App path: push-to-talk MediaRecorder + Whisper.
- * Skips SFSpeechRecognizer entirely (it kept hanging on sideloaded builds).
+ * iOS App path: PCM AudioContext capture + Whisper.
+ * Avoids MediaRecorder/mp4 (often silent after decode on iPhone WKWebView).
  * getUserMedia must start in the same turn as the tap — no awaits before it.
  */
 function startNativeWhisperListening() {
@@ -269,7 +271,7 @@ function startNativeWhisperListening() {
 
   void releaseAudioSession()
 
-  const recorder = createRecorder({ timeoutMs: 4000 })
+  const recorder = createPcmRecorder({ timeoutMs: 4000 })
   // Start getUserMedia immediately (user-gesture).
   const started = recorder.start()
 
@@ -281,7 +283,7 @@ function startNativeWhisperListening() {
   if (!state.awaitingRetry) state.heard = ''
   state.feedback = {
     type: 'info',
-    message: '正在錄音…請說英文，說完點「我說完了」。首次需下載語音模型。',
+    message: '正在錄音…請清楚說英文（至少 1 秒），說完點「我說完了」。',
   }
   render('patch')
 
@@ -354,18 +356,19 @@ async function startWhisperListening() {
   if (!canRecordAudio()) {
     throw new Error('recorder-unavailable')
   }
-  // Invoke getUserMedia in this turn BEFORE loading the model (iOS gesture).
-  const recorder = createRecorder({ timeoutMs: 5000 })
+  // Prefer PCM on Apple; MediaRecorder mp4 often becomes "silence" after decode.
+  const recorder = isAppleMobile()
+    ? createPcmRecorder({ timeoutMs: 5000 })
+    : createRecorder({ timeoutMs: 5000 })
   const started = recorder.start()
   state.recorder = recorder
   state.engine = 'whisper'
   state.listening = true
   state.micStarting = false
   if (!state.awaitingRetry) state.heard = ''
-  state.feedback = { type: 'info', message: '正在聽…說完後點「我說完了」。' }
+  state.feedback = { type: 'info', message: '正在錄音…說完後點「我說完了」。' }
   render('patch')
   await started
-  // Warm model while user speaks.
   void ensureStt().catch(() => {})
 }
 
@@ -380,9 +383,28 @@ function startListening() {
   render('patch')
 
   try {
-    // Capacitor iOS App: MediaRecorder + Whisper only (no SFSpeechRecognizer).
+    // Capacitor iOS App: PCM + Whisper (no SFSpeechRecognizer / MediaRecorder).
     if (isNativeApp()) {
       startNativeWhisperListening()
+      return
+    }
+    // On iPhone Safari, Web Speech is flaky — prefer PCM+Whisper too.
+    if (isAppleMobile() && canRecordAudio()) {
+      void startWhisperListening().catch((err) => {
+        state.micStarting = false
+        state.listening = false
+        state.micBusy = false
+        state.recorder = null
+        state.engine = null
+        const denied = err?.name === 'NotAllowedError' || err?.name === 'SecurityError'
+        state.feedback = {
+          type: 'warn',
+          message: denied
+            ? '請允許麥克風權限後再試。'
+            : '無法打開麥克風，請重試或用下方打字。',
+        }
+        render('patch')
+      })
       return
     }
     if (canUseWebSpeech()) {
@@ -453,7 +475,31 @@ async function finishListening() {
   state.engine = null
 
   try {
-    const { blob, durationMs } = await recorder.stop()
+    const stopped = await recorder.stop()
+
+    // PCM path (iOS App / iPhone)
+    if (recorder.kind === 'pcm' || stopped.audio) {
+      const { audio, durationMs, rms } = stopped
+      if (durationMs < 600 || !audio?.length) {
+        state.micBusy = false
+        noteEmptyListen(`錄音太短（${Math.round(durationMs || 0)}ms）。請再說久一點。`)
+        return
+      }
+      const { text } = await transcribePcm(audio, onSttStatus, { rms, durationMs })
+      state.micBusy = false
+      if (!text) {
+        noteEmptyListen(
+          `沒辨識出英文（音量 ${rms?.toFixed?.(4) || '?'}）。請再慢一點、清楚說，或用下方打字。`,
+        )
+        return
+      }
+      state.emptyListenCount = 0
+      evaluateAnswer(text)
+      return
+    }
+
+    // Legacy MediaRecorder blob path
+    const { blob, durationMs } = stopped
     if (durationMs < 450 || !blob || blob.size < 120) {
       state.micBusy = false
       noteEmptyListen('時間太短或沒有聲音，請再點「說英文」。')
@@ -471,11 +517,13 @@ async function finishListening() {
   } catch (err) {
     state.micBusy = false
     if (err?.message === 'silent-audio') {
-      noteEmptyListen('麥克風好像沒錄到聲音。請允許麥克風權限後再試。')
+      noteEmptyListen(
+        `麥克風幾乎沒錄到聲音（音量 ${err.rms?.toFixed?.(5) || '0'}）。請確認麥克風已開，或用下方打字。`,
+      )
     } else if (err?.message === 'empty-audio') {
       noteEmptyListen('沒錄到聲音，請再點「說英文」。')
     } else {
-      noteEmptyListen('辨識失敗，請再試一次，或用下方打字提交。')
+      noteEmptyListen(`辨識失敗（${err?.message || 'unknown'}），請再試或打字提交。`)
     }
   }
 }
@@ -712,7 +760,7 @@ function renderPractice() {
         <p class="hint">手機 App：等中文讀完 → 點「說英文」並立刻開口 → 再說一次點「我說完了」。不行就打字。答案請說英文。</p>
         ${
           isNativeApp()
-            ? `<p class="hint debug-perm">系統：${escapeHtml(nativePlatformLabel())} · 錄音模式 Whisper</p>`
+            ? `<p class="hint debug-perm">系統：${escapeHtml(nativePlatformLabel())} · PCM+Whisper v24</p>`
             : ''
         }
       </section>

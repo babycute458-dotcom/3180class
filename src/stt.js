@@ -1,7 +1,6 @@
 const MODEL_ID = 'Xenova/whisper-tiny.en'
 const TARGET_SAMPLE_RATE = 16000
-// v2 CDN build is a self-contained ESM (bundles onnxruntime). v4's transformers.web.js
-// has bare imports like "onnxruntime-web/webgpu" and fails in the browser.
+// v2 CDN build is a self-contained ESM (bundles onnxruntime).
 const TRANSFORMERS_CDN =
   'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js'
 
@@ -30,7 +29,7 @@ function setLoadStatus(phase, progress, message) {
 
 async function loadTransformers() {
   if (transformersMod) return transformersMod
-  setLoadStatus('download', 0, '正在加载语音引擎…')
+  setLoadStatus('download', 0, '正在載入語音引擎…')
   transformersMod = await import(/* @vite-ignore */ TRANSFORMERS_CDN)
   const { env } = transformersMod
   env.allowLocalModels = false
@@ -46,11 +45,11 @@ async function createTranscriber(remoteHost, onStatus) {
       if (!data) return
       const progress = typeof data.progress === 'number' ? Math.round(data.progress) : loadStatus.progress
       if (data.status === 'progress') {
-        setLoadStatus('download', progress, `下载语音模型… ${progress}%`)
+        setLoadStatus('download', progress, `下載語音模型… ${progress}%`)
       } else if (data.status === 'done' || data.status === 'ready') {
-        setLoadStatus('download', 100, '模型下载完成，正在准备…')
+        setLoadStatus('download', 100, '模型下載完成，正在準備…')
       } else if (data.status === 'initiate') {
-        setLoadStatus('download', progress || 0, '开始下载语音模型（约 40MB，仅首次）…')
+        setLoadStatus('download', progress || 0, '開始下載語音模型（約 40MB，僅首次）…')
       }
       onStatus?.(getSttLoadStatus())
     },
@@ -60,7 +59,7 @@ async function createTranscriber(remoteHost, onStatus) {
 /** Lazy-load Whisper tiny.en. Safe to call multiple times. */
 export function loadSttEngine(onStatus) {
   if (!transcriberPromise) {
-    setLoadStatus('download', 0, '首次使用需下载语音模型（约 40MB）…')
+    setLoadStatus('download', 0, '首次使用需下載語音模型（約 40MB）…')
     onStatus?.(getSttLoadStatus())
 
     transcriberPromise = (async () => {
@@ -69,7 +68,7 @@ export function loadSttEngine(onStatus) {
       for (const host of hosts) {
         try {
           const t = await createTranscriber(host, onStatus)
-          setLoadStatus('ready', 100, '语音模型已就绪')
+          setLoadStatus('ready', 100, '語音模型已就緒')
           onStatus?.(getSttLoadStatus())
           return t
         } catch (err) {
@@ -78,13 +77,13 @@ export function loadSttEngine(onStatus) {
           setLoadStatus(
             'download',
             0,
-            `下载失败（${err?.message || err}），正在换源重试…`,
+            `下載失敗（${err?.message || err}），正在換源重試…`,
           )
           onStatus?.(getSttLoadStatus())
         }
       }
       transcriberPromise = null
-      setLoadStatus('error', 0, '语音模型加载失败')
+      setLoadStatus('error', 0, '語音模型載入失敗')
       onStatus?.(getSttLoadStatus())
       throw lastError || new Error('STT model load failed')
     })()
@@ -96,7 +95,6 @@ export function loadSttEngine(onStatus) {
 
 function pickRecorderMime() {
   if (typeof MediaRecorder === 'undefined') return ''
-  // iOS only supports mp4/aac — preferring webm first makes some WebKits pick a bad path.
   const candidates = isAppleMobile()
     ? ['audio/mp4', 'audio/aac', 'audio/wav', 'audio/webm']
     : ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus']
@@ -104,10 +102,11 @@ function pickRecorderMime() {
 }
 
 export function canRecordAudio() {
-  return !!(navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined')
+  return !!(navigator.mediaDevices?.getUserMedia && (window.AudioContext || window.webkitAudioContext))
 }
 
 function downsampleTo16k(float32, inputRate) {
+  if (!float32?.length) return new Float32Array(0)
   if (inputRate === TARGET_SAMPLE_RATE) return float32
   const ratio = inputRate / TARGET_SAMPLE_RATE
   const outLen = Math.max(1, Math.round(float32.length / ratio))
@@ -133,6 +132,35 @@ function rmsLevel(float32) {
     n += 1
   }
   return n ? Math.sqrt(sum / n) : 0
+}
+
+/** Peak-normalize so quiet/loud speech both reach Whisper cleanly. */
+function normalizeAudio(float32) {
+  if (!float32?.length) return float32
+  let peak = 0
+  for (let i = 0; i < float32.length; i += 1) {
+    const a = Math.abs(float32[i])
+    if (a > peak) peak = a
+  }
+  if (peak < 1e-8) return float32
+  // Target peak ~0.9; also gently boost very quiet takes.
+  const gain = Math.min(12, 0.9 / peak)
+  if (gain < 1.05) return float32
+  const out = new Float32Array(float32.length)
+  for (let i = 0; i < float32.length; i += 1) out[i] = float32[i] * gain
+  return out
+}
+
+function mergeFloatChunks(chunks) {
+  let total = 0
+  for (const c of chunks) total += c.length
+  const out = new Float32Array(total)
+  let offset = 0
+  for (const c of chunks) {
+    out.set(c, offset)
+    offset += c.length
+  }
+  return out
 }
 
 async function blobToMono16k(blob) {
@@ -166,8 +194,153 @@ async function blobToMono16k(blob) {
 }
 
 /**
- * One-shot push-to-talk recorder.
- * start() begins capture; stop() returns a Blob.
+ * PCM recorder via AudioContext — reliable on iOS WKWebView.
+ * MediaRecorder mp4 on iPhone often decodes to near-silence / empty for Whisper.
+ * Returns { audio: Float32Array@16k, durationMs, rms, sampleRate }.
+ */
+export function createPcmRecorder({ timeoutMs = 5000 } = {}) {
+  let mediaStream = null
+  let ctx = null
+  let source = null
+  let processor = null
+  let mute = null
+  let chunks = []
+  let startedAt = 0
+  let inputRate = TARGET_SAMPLE_RATE
+
+  async function start() {
+    chunks = []
+    const gum = navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+      video: false,
+    })
+    const timed = new Promise((_, reject) => {
+      window.setTimeout(() => reject(new Error('getUserMedia-timeout')), timeoutMs)
+    })
+    mediaStream = await Promise.race([gum, timed])
+    void gum
+      .then((late) => {
+        if (late && late !== mediaStream) {
+          try {
+            late.getTracks().forEach((t) => t.stop())
+          } catch {
+            // ignore
+          }
+        }
+      })
+      .catch(() => {})
+
+    const AC = window.AudioContext || window.webkitAudioContext
+    ctx = new AC()
+    inputRate = ctx.sampleRate || 44100
+    if (ctx.state === 'suspended') {
+      await Promise.race([
+        ctx.resume(),
+        new Promise((r) => window.setTimeout(r, 800)),
+      ])
+    }
+
+    source = ctx.createMediaStreamSource(mediaStream)
+    // ScriptProcessor is deprecated but still the most compatible path on iOS WKWebView.
+    processor = ctx.createScriptProcessor(4096, 1, 1)
+    processor.onaudioprocess = (event) => {
+      const input = event.inputBuffer.getChannelData(0)
+      // Copy — the buffer is reused.
+      chunks.push(new Float32Array(input))
+    }
+
+    // Must connect to destination or iOS may not fire onaudioprocess.
+    mute = ctx.createGain()
+    mute.gain.value = 0
+    source.connect(processor)
+    processor.connect(mute)
+    mute.connect(ctx.destination)
+
+    startedAt = Date.now()
+  }
+
+  function stop() {
+    const durationMs = Date.now() - startedAt
+    const rate = inputRate
+    const raw = mergeFloatChunks(chunks)
+    chunks = []
+
+    try {
+      processor?.disconnect()
+    } catch {
+      // ignore
+    }
+    try {
+      source?.disconnect()
+    } catch {
+      // ignore
+    }
+    try {
+      mute?.disconnect()
+    } catch {
+      // ignore
+    }
+    try {
+      mediaStream?.getTracks?.().forEach((t) => t.stop())
+    } catch {
+      // ignore
+    }
+    mediaStream = null
+    processor = null
+    source = null
+    mute = null
+    const closing = ctx
+    ctx = null
+    void closing?.close?.()
+
+    const audio = normalizeAudio(downsampleTo16k(raw, rate))
+    const rms = rmsLevel(audio)
+    return Promise.resolve({ audio, durationMs, rms, sampleRate: TARGET_SAMPLE_RATE })
+  }
+
+  function cancel() {
+    chunks = []
+    try {
+      processor?.disconnect()
+    } catch {
+      // ignore
+    }
+    try {
+      source?.disconnect()
+    } catch {
+      // ignore
+    }
+    try {
+      mute?.disconnect()
+    } catch {
+      // ignore
+    }
+    try {
+      mediaStream?.getTracks?.().forEach((t) => t.stop())
+    } catch {
+      // ignore
+    }
+    try {
+      void ctx?.close?.()
+    } catch {
+      // ignore
+    }
+    mediaStream = null
+    processor = null
+    source = null
+    mute = null
+    ctx = null
+  }
+
+  return { start, stop, cancel, kind: 'pcm' }
+}
+
+/**
+ * Legacy MediaRecorder path (desktop fallback).
  */
 export function createRecorder({ timeoutMs = 5000 } = {}) {
   let mediaStream = null
@@ -177,22 +350,22 @@ export function createRecorder({ timeoutMs = 5000 } = {}) {
 
   async function start() {
     chunks = []
-    // Keep constraints minimal — fancy constraints hang more often on iOS WKWebView.
     const gum = navigator.mediaDevices.getUserMedia({ audio: true, video: false })
     const timed = new Promise((_, reject) => {
       window.setTimeout(() => reject(new Error('getUserMedia-timeout')), timeoutMs)
     })
     mediaStream = await Promise.race([gum, timed])
-    // If timed out, still try to stop a late stream.
-    void gum.then((late) => {
-      if (late && late !== mediaStream) {
-        try {
-          late.getTracks().forEach((t) => t.stop())
-        } catch {
-          // ignore
+    void gum
+      .then((late) => {
+        if (late && late !== mediaStream) {
+          try {
+            late.getTracks().forEach((t) => t.stop())
+          } catch {
+            // ignore
+          }
         }
-      }
-    }).catch(() => {})
+      })
+      .catch(() => {})
 
     const mime = pickRecorderMime()
     recorder = mime ? new MediaRecorder(mediaStream, { mimeType: mime }) : new MediaRecorder(mediaStream)
@@ -200,7 +373,6 @@ export function createRecorder({ timeoutMs = 5000 } = {}) {
       if (event.data && event.data.size > 0) chunks.push(event.data)
     }
     startedAt = Date.now()
-    // timeslice helps some mobile browsers flush audio chunks
     try {
       recorder.start(200)
     } catch {
@@ -274,23 +446,26 @@ export function createRecorder({ timeoutMs = 5000 } = {}) {
     chunks = []
   }
 
-  return { start, stop, cancel }
+  return { start, stop, cancel, kind: 'blob' }
 }
 
-export async function transcribeBlob(blob, onStatus) {
+export async function transcribePcm(audio, onStatus, meta = {}) {
   const transcriber = await loadSttEngine(onStatus)
   setLoadStatus('transcribe', 0, '正在辨識英文…')
   onStatus?.(getSttLoadStatus())
 
-  const { audio, rms } = await blobToMono16k(blob)
-  if (!audio.length) {
+  if (!audio?.length) {
     throw new Error('empty-audio')
   }
-  if (rms < 0.0008) {
-    throw new Error('silent-audio')
+  const rms = typeof meta.rms === 'number' ? meta.rms : rmsLevel(audio)
+  // Very low bar — PCM path already normalized; only reject true digital silence.
+  if (rms < 0.00005) {
+    const err = new Error('silent-audio')
+    err.rms = rms
+    err.durationMs = meta.durationMs
+    throw err
   }
 
-  // xenova v2 accepts Float32Array; also pass sampling_rate explicitly.
   const result = await transcriber(audio, {
     language: 'english',
     task: 'transcribe',
@@ -299,11 +474,40 @@ export async function transcribeBlob(blob, onStatus) {
   })
 
   let text = String(result?.text || '').trim()
-  // Whisper sometimes emits only punctuation / blanks on bad audio.
   text = text.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, '').trim()
   if (!/[a-zA-Z]/.test(text)) text = ''
 
-  setLoadStatus('ready', 100, '语音模型已就绪')
+  setLoadStatus('ready', 100, '語音模型已就緒')
+  onStatus?.(getSttLoadStatus())
+  return { text, rms, durationMs: meta.durationMs || 0 }
+}
+
+export async function transcribeBlob(blob, onStatus) {
+  const transcriber = await loadSttEngine(onStatus)
+  setLoadStatus('transcribe', 0, '正在辨識英文…')
+  onStatus?.(getSttLoadStatus())
+
+  const { audio, rms } = await blobToMono16k(blob)
+  const boosted = normalizeAudio(audio)
+  if (!boosted.length) {
+    throw new Error('empty-audio')
+  }
+  if (rms < 0.00005) {
+    throw new Error('silent-audio')
+  }
+
+  const result = await transcriber(boosted, {
+    language: 'english',
+    task: 'transcribe',
+    return_timestamps: false,
+    sampling_rate: TARGET_SAMPLE_RATE,
+  })
+
+  let text = String(result?.text || '').trim()
+  text = text.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, '').trim()
+  if (!/[a-zA-Z]/.test(text)) text = ''
+
+  setLoadStatus('ready', 100, '語音模型已就緒')
   onStatus?.(getSttLoadStatus())
   return text
 }
@@ -311,8 +515,6 @@ export async function transcribeBlob(blob, onStatus) {
 /**
  * Web Speech session.
  * On iPhone use continuous:false (one-shot). Desktop can use push-to-talk.
- * IMPORTANT: start() must be called directly inside a user-gesture stack
- * (no await/sleep before recognition.start()).
  */
 export function createWebSpeechSession({ continuous = false } = {}) {
   if (!canUseWebSpeech()) {
@@ -368,7 +570,6 @@ export function createWebSpeechSession({ continuous = false } = {}) {
       settle = null
     }
 
-    // Must run in the same turn as the tap on iOS.
     recognition.start()
     return done
   }
