@@ -2,7 +2,7 @@
     <div class="shell">
       <section class="hero">
         <h1 class="brand"><span>Speak Chinese → Answer English</span>對練 <small class="ver">${ne}</small></h1>
-        <p class="lede">機器讀中文（台灣），你講英文。說錯會糾正，說對就隨機出下一題。已收錄你筆記本裡的 ${t} 句。</p>
+        <p class="lede">機器讀中文（台灣），你講英文。辨識字必須整句正確才過關；答對後請自己按「下一題」。已收錄你筆記本裡的 ${t} 句。</p>
         ${s?'<p class="hint">語音：雲端辨識已開啟（類似 Google 翻譯等級）。</p>':`<div class="install-card">
                 <strong>啟用「像 Google 翻譯」的語音辨識</strong>
                 <p>Google 翻譯用的是雲端辨識。請先點「語音設定」，免費申請 Groq 金鑰並貼上（約 2 分鐘），辨識會準很多。</p>
