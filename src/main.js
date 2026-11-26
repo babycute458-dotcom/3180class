@@ -792,7 +792,7 @@ function renderHome() {
     <div class="shell">
       <section class="hero">
         <h1 class="brand"><span>Speak Chinese → Answer English</span>對練 <small class="ver">${APP_VERSION}</small></h1>
-        <p class="lede">機器讀中文（台灣），你講英文。說錯會糾正，說對就隨機出下一題。已收錄你筆記本裡的 ${total} 句。</p>
+        <p class="lede">機器讀中文（台灣），你講英文。辨識字必須整句正確才過關；答對後請自己按「下一題」。已收錄你筆記本裡的 ${total} 句。</p>
         ${
           cloudReady
             ? `<p class="hint">語音：雲端辨識已開啟（類似 Google 翻譯等級）。</p>`
