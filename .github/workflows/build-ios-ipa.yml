@@ -2,6 +2,9 @@ name: Build duilian iOS IPA (Sideloadly)
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - cursor/duilian-speech-practice-d923
 
 jobs:
   ipa:
