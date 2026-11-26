@@ -32,6 +32,12 @@ jobs:
           npx cap add ios
           npx cap sync ios
 
+      - name: Install CocoaPods
+        run: |
+          set -euo pipefail
+          cd ios/App
+          pod install --repo-update
+
       - name: Patch Info.plist privacy strings
         run: |
           PLIST="ios/App/App/Info.plist"
@@ -45,7 +51,7 @@ jobs:
           set -euo pipefail
           cd ios/App
           xcodebuild \
-            -project App.xcodeproj \
+            -workspace App.xcworkspace \
             -scheme App \
             -configuration Release \
             -sdk iphoneos \
