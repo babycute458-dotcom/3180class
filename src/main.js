@@ -1,6 +1,5 @@
 import './style.css'
 import { SENTENCES, SETS } from './sentences.js'
-import { sameMeaning } from './meaning.js'
 import {
   canRecordAudio,
   canUseWebSpeech,
@@ -48,10 +47,12 @@ const state = {
   sttSettings: loadSttSettings(),
   settingsDraft: null,
   settingsMsg: null,
+  roundPassed: false, // must pass before 「下一題」
+  lastCompareHtml: '',
 }
 
 const app = document.querySelector('#app')
-const APP_VERSION = 'v26'
+const APP_VERSION = 'v27'
 const TTS_LANG = 'zh-TW'
 const TTS_RELEASE_MS = 0
 
@@ -64,8 +65,36 @@ function normalize(text) {
     .trim()
 }
 
+/**
+ * Strict match: heard must equal expected (or an explicit alt) after normalize.
+ * Wrong words / inaccurate pronunciation that ASR captures differently will NOT pass.
+ */
 function isMatch(heard, expected, alts = []) {
-  return sameMeaning(heard, expected, alts)
+  const h = normalize(heard)
+  if (!h) return false
+  const candidates = [expected, ...(alts || [])].map(normalize).filter(Boolean)
+  return candidates.includes(h)
+}
+
+/** Highlight which heard words match the target sentence. */
+function buildHeardCompareHtml(heard, expected, passed) {
+  const raw = String(heard || '').trim()
+  if (!raw) return '—'
+  if (passed) {
+    return `<span class="w ok">${escapeHtml(raw)}</span>`
+  }
+  const expectedSet = new Set(normalize(expected).split(' ').filter(Boolean))
+  // Keep original spacing tokens for display when possible.
+  const parts = raw.split(/(\s+)/)
+  return parts
+    .map((part) => {
+      if (/^\s+$/.test(part)) return part
+      const key = normalize(part)
+      if (!key) return escapeHtml(part)
+      const ok = expectedSet.has(key)
+      return `<span class="w ${ok ? 'ok' : 'bad'}" title="${ok ? '正確' : '與此句不符'}">${escapeHtml(part)}</span>`
+    })
+    .join('')
 }
 
 function pickRandom(excludeId) {
@@ -586,36 +615,45 @@ function evaluateAnswer(heard) {
 
   const expected = state.current.en
   const alts = state.current.alts || []
-  if (isMatch(heard, expected, alts)) {
+  const passed = isMatch(heard, expected, alts)
+  state.lastCompareHtml = buildHeardCompareHtml(heard, expected, passed)
+
+  if (passed) {
     state.awaitingRetry = false
+    state.roundPassed = true
     state.correctCount += 1
-    const exact = normalize(heard) === normalize(expected)
     state.feedback = {
       type: 'good',
-      message: exact ? '正確！' : '意思對了，通過！',
+      message: '正確！請核對下方辨識文字，再自己按「下一題」。',
     }
-    render('patch')
-    window.setTimeout(() => {
-      nextSentence(true)
-    }, 900)
+    render('full')
     return
   }
 
   state.awaitingRetry = true
-  const tip = alts.length ? `也可以說：${alts.slice(0, 2).join(' / ')}` : ''
+  state.roundPassed = false
   state.feedback = {
     type: 'bad',
-    message: tip ? `不太對，請再點「說英文」：（${tip}）` : '不太對，請再點「說英文」：',
+    message: '字不對，不能下一題。紅色是系統聽到但不符的字；請再講一次或打字。',
     answer: expected,
   }
-  render('patch')
+  render('full')
 }
 
 function rebuildPool() {
   state.pool = SENTENCES.filter((s) => state.selected.has(s.set))
 }
 
-function nextSentence(fromCorrect = false) {
+function advanceToNewSentence({ force = false } = {}) {
+  if (!force && state.view === 'practice' && state.current && !state.roundPassed) {
+    state.feedback = {
+      type: 'warn',
+      message: '這一題還沒答對，不能跳下一題。請看「系統聽到的字」後再講一次。',
+    }
+    render('patch')
+    return
+  }
+
   stopSpeaking()
   cancelRecording()
   clearTypedInput()
@@ -627,14 +665,30 @@ function nextSentence(fromCorrect = false) {
   }
   state.current = next
   state.awaitingRetry = false
+  state.roundPassed = false
   state.heard = ''
+  state.lastCompareHtml = ''
   state.feedback = {
     type: 'info',
-    message: fromCorrect
-      ? '下一題：先點「聽中文」，再說英文'
-      : '先點「聽中文」，再點「說英文」；說完稍等會自動辨識',
+    message: '先點「聽中文」，再點「說英文」；說完點「我說完了」。答對後請自己按「下一題」。',
   }
   render('full')
+}
+
+function nextSentence(_fromCorrect = false) {
+  advanceToNewSentence({ force: true })
+}
+
+function goNextIfPassed() {
+  if (!state.roundPassed) {
+    state.feedback = {
+      type: 'warn',
+      message: '請先講對（或打字提交正確整句），才能下一題。',
+    }
+    render('patch')
+    return
+  }
+  advanceToNewSentence({ force: true })
 }
 
 function unlockSpeech() {
@@ -669,7 +723,11 @@ function startPractice() {
   state.view = 'practice'
   state.correctCount = 0
   state.attemptCount = 0
-  nextSentence(false)
+  state.current = null
+  state.roundPassed = false
+  state.heard = ''
+  state.lastCompareHtml = ''
+  advanceToNewSentence({ force: true })
 }
 
 function openSettings() {
@@ -835,18 +893,21 @@ function statusPill() {
 function micLabel() {
   if (state.micStarting) return '準備中…'
   if (state.micBusy) return '辨識中…'
-  if (state.listening) {
-    // Always allow the user to end listening manually — auto-end is best-effort on iOS.
-    return '我說完了'
-  }
+  if (state.listening) return '我說完了'
+  if (state.roundPassed) return '已過關'
   if (state.awaitingRetry) return '再講一次'
   return '說英文'
+}
+
+function nextButtonLabel() {
+  return state.roundPassed ? '下一題' : '下一題（需先答對）'
 }
 
 function renderPractice() {
   const s = state.current
   const fb = state.feedback
   const pill = statusPill()
+  const heardHtml = state.lastCompareHtml || escapeHtml(state.heard || '—')
 
   return `
     <div class="shell" data-practice="1">
@@ -863,38 +924,41 @@ function renderPractice() {
         <p class="prompt-label">中文提示（台灣）</p>
         <h2 class="prompt-zh" data-el="zh">${escapeHtml(s?.zh || '')}</h2>
         <div class="status-row" data-el="status"><span class="${pill.className}">${escapeHtml(pill.text)}</span></div>
-        <p class="heard">你說的：<strong data-el="heard">${escapeHtml(state.heard || '—')}</strong></p>
+        <div class="heard-block">
+          <p class="heard-label">系統聽到的字（請核對）</p>
+          <p class="heard" data-el="heard">${heardHtml}</p>
+        </div>
         <div class="correction-slot" data-el="correction">
           ${
             fb?.type === 'bad'
-              ? `<div class="correction">${escapeHtml(fb.message)}<span class="answer">${escapeHtml(fb.answer)}</span></div>`
-              : ''
+              ? `<div class="correction">${escapeHtml(fb.message)}<span class="answer">正確句子：${escapeHtml(fb.answer)}</span></div>`
+              : fb?.type === 'good'
+                ? `<div class="correction good-box">正確句子：<span class="answer">${escapeHtml(s?.en || '')}</span></div>`
+                : ''
           }
         </div>
         <div class="actions">
           <button class="btn btn-ghost" data-action="replay" type="button" data-el="zh-btn">聽中文</button>
-          <button class="btn btn-mic ${state.listening ? 'listening' : ''}" data-action="mic" type="button" data-el="mic">
+          <button class="btn btn-mic ${state.listening ? 'listening' : ''}" data-action="mic" type="button" data-el="mic" ${state.roundPassed ? 'disabled' : ''}>
             ${micLabel()}
           </button>
-          <button class="btn btn-ghost" data-action="skip" type="button">跳過 / 下一題</button>
+          <button class="btn ${state.roundPassed ? 'btn-primary' : 'btn-ghost'}" data-action="next" type="button" data-el="next" ${state.roundPassed ? '' : 'disabled'}>
+            ${nextButtonLabel()}
+          </button>
         </div>
         <div class="manual">
-          <label for="typed">也可以打字提交</label>
+          <label for="typed">也可以打字提交（須與正確句子一致）</label>
           <div class="manual-row">
-            <input id="typed" type="text" autocomplete="off" placeholder="Type the English sentence" />
-            <button class="btn btn-primary" data-action="submit-typed" type="button">提交</button>
+            <input id="typed" type="text" autocomplete="off" placeholder="Type the English sentence" ${state.roundPassed ? 'disabled' : ''} />
+            <button class="btn btn-primary" data-action="submit-typed" type="button" ${state.roundPassed ? 'disabled' : ''}>提交</button>
           </div>
         </div>
-        <p class="hint">說完點「我說完了」。短句也可以。${
-          hasCloudSttKey(state.sttSettings)
-            ? '目前：雲端辨識（類似 Google 翻譯）。'
-            : '尚未設定雲端金鑰 → 點上方「語音」啟用（免費、更準）。'
-        }</p>
+        <p class="hint">規則：辨識到的英文必須整句正確才算過關；答對後不會自動跳題，請自己按「下一題」。紅字＝聽到但不對。</p>
         ${
           isNativeApp()
             ? `<p class="hint debug-perm">系統：${escapeHtml(nativePlatformLabel())} · ${
                 hasCloudSttKey(state.sttSettings) ? 'Cloud STT' : '本機備援'
-              } v26</p>`
+              } v27</p>`
             : ''
         }
       </section>
@@ -917,7 +981,12 @@ function patchPractice() {
   setText('[data-el="correct"]', String(state.correctCount))
   setText('[data-el="attempts"]', String(state.attemptCount))
   setText('[data-el="zh"]', state.current?.zh || '')
-  setText('[data-el="heard"]', state.heard || '—')
+
+  const heardEl = root.querySelector('[data-el="heard"]')
+  if (heardEl) {
+    const html = state.lastCompareHtml || escapeHtml(state.heard || '—')
+    if (heardEl.innerHTML !== html) heardEl.innerHTML = html
+  }
 
   const pill = statusPill()
   const status = root.querySelector('[data-el="status"]')
@@ -931,10 +1000,13 @@ function patchPractice() {
   const correction = root.querySelector('[data-el="correction"]')
   if (correction) {
     const fb = state.feedback
+    const s = state.current
     const html =
       fb?.type === 'bad'
-        ? `<div class="correction">${escapeHtml(fb.message)}<span class="answer">${escapeHtml(fb.answer)}</span></div>`
-        : ''
+        ? `<div class="correction">${escapeHtml(fb.message)}<span class="answer">正確句子：${escapeHtml(fb.answer)}</span></div>`
+        : fb?.type === 'good'
+          ? `<div class="correction good-box">正確句子：<span class="answer">${escapeHtml(s?.en || '')}</span></div>`
+          : ''
     if (correction.innerHTML !== html) correction.innerHTML = html
   }
 
@@ -943,11 +1015,25 @@ function patchPractice() {
     const label = micLabel()
     if (mic.textContent.trim() !== label) mic.textContent = label
     mic.classList.toggle('listening', state.listening)
-    mic.disabled = !!(state.micStarting || state.micBusy)
+    mic.disabled = !!(state.micStarting || state.micBusy || state.roundPassed)
+  }
+
+  const nextBtn = root.querySelector('[data-el="next"]')
+  if (nextBtn) {
+    const label = nextButtonLabel()
+    if (nextBtn.textContent.trim() !== label) nextBtn.textContent = label
+    nextBtn.disabled = !state.roundPassed
+    nextBtn.classList.toggle('btn-primary', state.roundPassed)
+    nextBtn.classList.toggle('btn-ghost', !state.roundPassed)
   }
 
   const zhBtn = root.querySelector('[data-el="zh-btn"]')
   if (zhBtn) zhBtn.disabled = !!(state.speaking || state.listening || state.micBusy)
+
+  const typed = root.querySelector('#typed')
+  const submit = root.querySelector('[data-action="submit-typed"]')
+  if (typed) typed.disabled = !!state.roundPassed
+  if (submit) submit.disabled = !!state.roundPassed
 }
 
 function render(mode = 'full') {
@@ -1006,15 +1092,16 @@ app.addEventListener('click', (event) => {
     speakChinese(state.current.zh)
   }
   if (action === 'mic') {
-    if (state.micBusy || state.micStarting) return
+    if (state.micBusy || state.micStarting || state.roundPassed) return
     if (state.listening) {
       void finishListening()
     } else {
       void startListening()
     }
   }
-  if (action === 'skip') nextSentence(false)
+  if (action === 'next' || action === 'skip') goNextIfPassed()
   if (action === 'submit-typed') {
+    if (state.roundPassed) return
     const input = document.querySelector('#typed')
     const value = input?.value?.trim() || ''
     if (value) evaluateAnswer(value)

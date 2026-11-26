@@ -306,18 +306,58 @@ button {
   color: var(--warn);
 }
 
-.heard {
+.heard-block {
   margin: 0 0 1rem;
+}
+
+.heard-label {
+  margin: 0 0 0.35rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--accent-deep);
+}
+
+.heard {
+  margin: 0;
   padding: 0.9rem 1rem;
   border-radius: 14px;
   background: var(--paper);
-  color: var(--ink-soft);
+  color: var(--ink);
   min-height: 3.2rem;
+  font-size: 1.15rem;
+  font-weight: 600;
+  line-height: 1.55;
+  word-break: break-word;
 }
 
-.heard strong {
-  color: var(--ink);
-  font-weight: 600;
+.heard .w {
+  display: inline;
+  padding: 0.05em 0.15em;
+  border-radius: 4px;
+}
+
+.heard .w.ok {
+  background: var(--good-bg);
+  color: var(--good);
+}
+
+.heard .w.bad {
+  background: var(--bad-bg);
+  color: var(--bad);
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+}
+
+.correction.good-box {
+  background: var(--good-bg);
+  color: var(--good);
+}
+
+.btn:disabled,
+.btn-mic:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .correction-slot {
