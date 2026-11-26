@@ -40,7 +40,7 @@ const state = {
 }
 
 const app = document.querySelector('#app')
-const APP_VERSION = 'v24'
+const APP_VERSION = 'v25'
 const TTS_LANG = 'zh-TW'
 const TTS_RELEASE_MS = 0
 
@@ -283,7 +283,7 @@ function startNativeWhisperListening() {
   if (!state.awaitingRetry) state.heard = ''
   state.feedback = {
     type: 'info',
-    message: '正在錄音…請清楚說英文（至少 1 秒），說完點「我說完了」。',
+    message: '正在錄音…說完英文就點「我說完了」（短句也可以）。',
   }
   render('patch')
 
@@ -477,19 +477,20 @@ async function finishListening() {
   try {
     const stopped = await recorder.stop()
 
-    // PCM path (iOS App / iPhone)
+    // PCM path (iOS App / iPhone) — short sentences are OK; Whisper padding handles length.
     if (recorder.kind === 'pcm' || stopped.audio) {
       const { audio, durationMs, rms } = stopped
-      if (durationMs < 600 || !audio?.length) {
+      // Only reject if literally no samples (e.g. mic never started).
+      if (!audio?.length) {
         state.micBusy = false
-        noteEmptyListen(`錄音太短（${Math.round(durationMs || 0)}ms）。請再說久一點。`)
+        noteEmptyListen('沒錄到音訊，請再點「說英文」。')
         return
       }
       const { text } = await transcribePcm(audio, onSttStatus, { rms, durationMs })
       state.micBusy = false
       if (!text) {
         noteEmptyListen(
-          `沒辨識出英文（音量 ${rms?.toFixed?.(4) || '?'}）。請再慢一點、清楚說，或用下方打字。`,
+          `沒辨識出英文（音量 ${rms?.toFixed?.(4) || '?'}）。請再試一次，或用下方打字。`,
         )
         return
       }
@@ -500,9 +501,9 @@ async function finishListening() {
 
     // Legacy MediaRecorder blob path
     const { blob, durationMs } = stopped
-    if (durationMs < 450 || !blob || blob.size < 120) {
+    if (!blob || blob.size < 40) {
       state.micBusy = false
-      noteEmptyListen('時間太短或沒有聲音，請再點「說英文」。')
+      noteEmptyListen('沒錄到聲音，請再點「說英文」。')
       return
     }
 
@@ -760,7 +761,7 @@ function renderPractice() {
         <p class="hint">手機 App：等中文讀完 → 點「說英文」並立刻開口 → 再說一次點「我說完了」。不行就打字。答案請說英文。</p>
         ${
           isNativeApp()
-            ? `<p class="hint debug-perm">系統：${escapeHtml(nativePlatformLabel())} · PCM+Whisper v24</p>`
+            ? `<p class="hint debug-perm">系統：${escapeHtml(nativePlatformLabel())} · PCM+Whisper v25</p>`
             : ''
         }
       </section>

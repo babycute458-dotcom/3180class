@@ -151,6 +151,21 @@ function normalizeAudio(float32) {
   return out
 }
 
+/**
+ * Whisper tiny often returns empty on very short clips.
+ * Pad with silence so the model sees enough frames — user may speak a short sentence.
+ */
+function padAudioForWhisper(float32, minSeconds = 1.2) {
+  const minSamples = Math.round(TARGET_SAMPLE_RATE * minSeconds)
+  if (!float32?.length) return new Float32Array(minSamples)
+  if (float32.length >= minSamples) return float32
+  const out = new Float32Array(minSamples)
+  // Center the utterance in the padded window.
+  const offset = Math.floor((minSamples - float32.length) / 2)
+  out.set(float32, offset)
+  return out
+}
+
 function mergeFloatChunks(chunks) {
   let total = 0
   for (const c of chunks) total += c.length
@@ -458,7 +473,7 @@ export async function transcribePcm(audio, onStatus, meta = {}) {
     throw new Error('empty-audio')
   }
   const rms = typeof meta.rms === 'number' ? meta.rms : rmsLevel(audio)
-  // Very low bar — PCM path already normalized; only reject true digital silence.
+  // Only reject true digital silence — short sentences are fine.
   if (rms < 0.00005) {
     const err = new Error('silent-audio')
     err.rms = rms
@@ -466,7 +481,8 @@ export async function transcribePcm(audio, onStatus, meta = {}) {
     throw err
   }
 
-  const result = await transcriber(audio, {
+  const padded = padAudioForWhisper(audio, 1.2)
+  const result = await transcriber(padded, {
     language: 'english',
     task: 'transcribe',
     return_timestamps: false,
@@ -488,8 +504,8 @@ export async function transcribeBlob(blob, onStatus) {
   onStatus?.(getSttLoadStatus())
 
   const { audio, rms } = await blobToMono16k(blob)
-  const boosted = normalizeAudio(audio)
-  if (!boosted.length) {
+  const boosted = padAudioForWhisper(normalizeAudio(audio), 1.2)
+  if (!audio.length) {
     throw new Error('empty-audio')
   }
   if (rms < 0.00005) {
